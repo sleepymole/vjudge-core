@@ -1,11 +1,12 @@
 import requests
 import threading
 import logging
+import json
 from queue import Queue, Empty
 from abc import ABCMeta, abstractclassmethod
 from sqlalchemy import func
 from datetime import datetime, timedelta
-from config import OJ_ACCOUNTS, get_header
+from config import OJ_CONFIG, get_header
 from .models import Submission, Problem
 from . import db, exceptions
 
@@ -45,6 +46,9 @@ class BaseClient(metaclass=ABCMeta):
 class VJudge(threading.Thread):
     def __init__(self, submit_queue, crawl_queue):
         super().__init__()
+        with open(OJ_CONFIG) as f:
+            oj_config = json.load(f)
+        self.accounts = oj_config['accounts']
         self.submit_queue = submit_queue
         self.crawl_queue = crawl_queue
         self.judge_queues = {}
@@ -52,10 +56,10 @@ class VJudge(threading.Thread):
         self.available_ojs = []
 
     def run(self):
-        for oj_name in OJ_ACCOUNTS:
+        for oj_name in self.accounts:
             self.judge_queues[oj_name] = Queue()
             self.status_queues[oj_name] = Queue()
-            accounts = OJ_ACCOUNTS[oj_name]
+            accounts = self.accounts[oj_name]
             available = False
             for username in accounts:
                 password = accounts[username]
