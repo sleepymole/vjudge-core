@@ -25,7 +25,6 @@ def crawler(oj_name, client, start, end):
             db.session.add(p)
             db.session.commit()
             logging.info('problem update: {}'.format(p.summary()))
-            print()
 
 
 crawler('scu', SOJClient(), 1000, 5000)

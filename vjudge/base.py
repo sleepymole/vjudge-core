@@ -104,29 +104,6 @@ class VJudge(threading.Thread):
                 db.session.commit()
                 self.status_queues[oj_name].put(submission.id)
 
-    def refresh_status(self, oj_name):
-        queue = self.status_queues[oj_name]
-        client = self._get_oj_client(oj_name)
-        while True:
-            submission = Submission.query.get(queue.get(3600))
-            if datetime.utcnow() - timedelta(hours=2) > submission.time_stamp:
-                submission.verdict = 'Judge Timeout'
-                db.session.commit()
-                continue
-            try:
-                verdict, exe_time, exe_mem = client.get_submit_status(submission.run_id,
-                                                                      user_id=submission.user_id,
-                                                                      problem_id=submission.problem_id)
-            except exceptions.ConnectionError:
-                return
-            if verdict in ('Being Judged', 'Queuing', 'Compiling', 'Running'):
-                queue.put(submission.id)
-            else:
-                submission.verdict = verdict
-                submission.exe_time = exe_time
-                submission.exe_mem = exe_mem
-                db.session.commit()
-
     def handle_requests(self):
         while True:
             id = self.submit_queue.get()
@@ -136,6 +113,32 @@ class VJudge(threading.Thread):
                 db.session.commit()
                 continue
             self.judge_queues[submission.oj_name].put(id)
+
+    def refresh_status(self, oj_name):
+        queue = self.status_queues[oj_name]
+        client = self._get_oj_client(oj_name)
+        while True:
+            try:
+                submission = Submission.query.get(queue.get(3600))
+                if datetime.utcnow() - timedelta(hours=2) > submission.time_stamp:
+                    submission.verdict = 'Judge Timeout'
+                    db.session.commit()
+                    continue
+                try:
+                    verdict, exe_time, exe_mem = client.get_submit_status(submission.run_id,
+                                                                          user_id=submission.user_id,
+                                                                          problem_id=submission.problem_id)
+                except exceptions.ConnectionError:
+                    return
+                if verdict in ('Being Judged', 'Queuing', 'Compiling', 'Running'):
+                    queue.put(submission.id)
+                else:
+                    submission.verdict = verdict
+                    submission.exe_time = exe_time
+                    submission.exe_mem = exe_mem
+                    db.session.commit()
+            except Empty:
+                self.refresh_status_all()
 
     def refresh_status_all(self):
         submissions = Submission.query.filter(Submission.verdict == 'Being Judged').filter(
