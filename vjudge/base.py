@@ -59,18 +59,7 @@ class VJudge(threading.Thread):
         for oj_name in self.accounts:
             self.judge_queues[oj_name] = Queue()
             self.status_queues[oj_name] = Queue()
-            accounts = self.accounts[oj_name]
-            available = False
-            for username in accounts:
-                password = accounts[username]
-                client = self._get_oj_client(oj_name, auth=(username, password))
-                if client is not None:
-                    logging.info("user '{}' log in to {} successfully".format(username, oj_name))
-                    available = True
-                    threading.Thread(target=self.judge, args=(client, oj_name, username), daemon=True).start()
-            if available:
-                self.available_ojs.append(oj_name)
-                threading.Thread(target=self.refresh_status, args=(oj_name,), daemon=True).start()
+            self.add_judge(oj_name)
         threading.Thread(target=self.handle_requests, daemon=True).start()
         threading.Thread(target=self.update_problem, daemon=True).start()
         if self.available_ojs:
@@ -105,14 +94,20 @@ class VJudge(threading.Thread):
                 self.status_queues[oj_name].put(submission.id)
 
     def handle_requests(self):
+        last = datetime.utcnow() - timedelta(minutes=30)
         while True:
-            id = self.submit_queue.get()
-            submission = Submission.query.filter_by(id=id).one()
+            submission = Submission.query.get(self.submit_queue.get())
             if submission.oj_name not in self.available_ojs:
-                submission.verdict = 'Submit Failed'
-                db.session.commit()
-                continue
-            self.judge_queues[submission.oj_name].put(id)
+                if submission.oj_name in self.accounts \
+                        and datetime.utcnow() - last > timedelta(minutes=30):
+                    self.add_judge(submission.oj_name)
+                    self.submit_queue.put(submission.id)
+                    last = datetime.utcnow()
+                else:
+                    submission.verdict = 'Submit Failed'
+                    db.session.commit()
+            else:
+                self.judge_queues[submission.oj_name].put(submission.id)
 
     def refresh_status(self, oj_name):
         queue = self.status_queues[oj_name]
@@ -120,6 +115,7 @@ class VJudge(threading.Thread):
         while True:
             try:
                 submission = Submission.query.get(queue.get(3600))
+                print(submission)
                 if datetime.utcnow() - timedelta(hours=2) > submission.time_stamp:
                     submission.verdict = 'Judge Timeout'
                     db.session.commit()
@@ -164,16 +160,17 @@ class VJudge(threading.Thread):
                     continue
                 if not result:
                     continue
-                p = Problem.query.filter_by(oj_name=oj_name, problem_id=problem_id).first() or Problem()
+                problem = Problem.query.filter_by(
+                    oj_name=oj_name, problem_id=problem_id).first() or Problem()
                 for attr in result:
-                    if hasattr(p, attr):
-                        setattr(p, attr, result[attr])
-                p.oj_name = oj_name
-                p.problem_id = problem_id
-                p.last_update = datetime.utcnow()
-                db.session.add(p)
+                    if hasattr(problem, attr):
+                        setattr(problem, attr, result[attr])
+                problem.oj_name = oj_name
+                problem.problem_id = problem_id
+                problem.last_update = datetime.utcnow()
+                db.session.add(problem)
                 db.session.commit()
-                logging.info('problem update: {}'.format(p.summary()))
+                logging.info('problem update: {}'.format(problem.summary()))
             except Empty:
                 self.update_problem_all()
 
@@ -190,6 +187,22 @@ class VJudge(threading.Thread):
             for i in range(1, 21):
                 problem_id = str(int(max_id) + i)
                 self.crawl_queue.put((oj_name, problem_id))
+
+    def add_judge(self, oj_name):
+        if oj_name not in self.accounts:
+            return
+        available = False
+        for username in self.accounts[oj_name]:
+            password = self.accounts[oj_name][username]
+            client = self._get_oj_client(oj_name, auth=(username, password))
+            if client is not None:
+                logging.info("user '{}' log in to {} successfully".format(username, oj_name))
+                available = True
+                threading.Thread(target=self.judge, args=(client, oj_name, username), daemon=True).start()
+        if available:
+            self.available_ojs.append(oj_name)
+            threading.Thread(target=self.refresh_status, args=(oj_name,), daemon=True).start()
+        return available
 
     @staticmethod
     def _get_oj_client(oj_name, auth=None):

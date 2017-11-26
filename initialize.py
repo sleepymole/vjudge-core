@@ -27,5 +27,7 @@ def crawler(oj_name, client, start, end):
             logging.info('problem update: {}'.format(p.summary()))
 
 
+db.create_all()
+
 crawler('scu', SOJClient(), 1000, 5000)
 crawler('hdu', HDUClient(), 1000, 7000)
