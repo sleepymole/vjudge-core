@@ -10,6 +10,7 @@ base_url = 'http://acm.hdu.edu.cn'
 language_id = {'G++': '0', 'GCC': '1', 'C++': '2',
                'C': '3', 'Pascal': '4', 'Java': '5', 'C#': '6'}
 
+titles = ['Problem Description', 'Input', 'Output', 'Sample Input', 'Sample Output']
 page_titles = {'Problem Description': 'description', 'Input': 'input', 'Output': 'output',
                'Sample Input': 'sample_input', 'Sample Output': 'sample_output'}
 
@@ -172,7 +173,7 @@ class HDUClient(BaseClient):
                 return
         tags = soup.find_all('div', 'panel_title', align='left')
         index = 0
-        for title in page_titles:
+        for title in titles:
             while index < len(tags) and tags[index].string != title:
                 index += 1
             if index >= len(tags):
