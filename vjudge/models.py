@@ -57,6 +57,8 @@ class Problem(db.Model):
             'output': self.output,
             'sample_input': self.sample_input,
             'sample_output': self.sample_output,
+            'time_limit': self.time_limit,
+            'mem_limit': self.mem_limit
         }
         return problem_json
 
