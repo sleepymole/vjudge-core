@@ -1,14 +1,16 @@
-import requests
-import threading
-import logging
 import json
-from queue import Queue, Empty
+import logging
+import threading
 from abc import ABCMeta, abstractclassmethod
-from sqlalchemy import func
 from datetime import datetime, timedelta
+from queue import Queue, Empty
+
+import requests
+from sqlalchemy import func
+
 from config import OJ_CONFIG, get_header
-from .models import Submission, Problem
 from . import db, exceptions
+from .models import Submission, Problem
 
 logging.basicConfig(level=logging.INFO)
 
@@ -59,7 +61,7 @@ class VJudge(threading.Thread):
         for oj_name in self.accounts:
             self.judge_queues[oj_name] = Queue()
             self.status_queues[oj_name] = Queue()
-            self.add_judge(oj_name)
+            self._add_judge(oj_name)
         threading.Thread(target=self.handle_requests, daemon=True).start()
         threading.Thread(target=self.update_problem, daemon=True).start()
         if self.available_ojs:
@@ -100,7 +102,7 @@ class VJudge(threading.Thread):
             if submission.oj_name not in self.available_ojs:
                 if submission.oj_name in self.accounts \
                         and datetime.utcnow() - last > timedelta(minutes=30):
-                    self.add_judge(submission.oj_name)
+                    self._add_judge(submission.oj_name)
                     self.submit_queue.put(submission.id)
                     last = datetime.utcnow()
                 else:
@@ -115,7 +117,6 @@ class VJudge(threading.Thread):
         while True:
             try:
                 submission = Submission.query.get(queue.get(3600))
-                print(submission)
                 if datetime.utcnow() - timedelta(hours=2) > submission.time_stamp:
                     submission.verdict = 'Judge Timeout'
                     db.session.commit()
@@ -188,7 +189,7 @@ class VJudge(threading.Thread):
                 problem_id = str(int(max_id) + i)
                 self.crawl_queue.put((oj_name, problem_id))
 
-    def add_judge(self, oj_name):
+    def _add_judge(self, oj_name):
         if oj_name not in self.accounts:
             return
         available = False
