@@ -1,8 +1,10 @@
-from flask import Flask, jsonify, request, abort, url_for
 from datetime import datetime, timedelta
-from vjudge.models import db, Submission, Problem
-from sqlalchemy import and_
 from queue import Queue
+
+from flask import Flask, jsonify, request, abort, url_for
+from sqlalchemy import and_
+
+from vjudge.models import db, Submission, Problem
 
 app = Flask(__name__)
 submit_queue = Queue()
@@ -47,7 +49,7 @@ def get_problem(oj_name, problem_id):
 @app.route('/problems/<oj_name>/<problem_id>', methods=['PUT'])
 def update_problem(oj_name, problem_id):
     crawl_queue.put((oj_name, problem_id))
-    return jsonify({url_for('get_problem', oj_name=oj_name, problem_id=problem_id)})
+    return jsonify({'url': url_for('get_problem', oj_name=oj_name, problem_id=problem_id)})
 
 
 @app.route('/problems/', methods=['POST'])
