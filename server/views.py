@@ -46,7 +46,7 @@ def get_problem(oj_name, problem_id):
     return jsonify(problem.to_json())
 
 
-@app.route('/problems/<oj_name>/<problem_id>', methods=['PUT'])
+@app.route('/problems/<oj_name>/<problem_id>', methods=['POST'])
 def update_problem(oj_name, problem_id):
     crawl_queue.put((oj_name, problem_id))
     return jsonify({'url': url_for('get_problem', oj_name=oj_name, problem_id=problem_id)})
