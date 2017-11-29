@@ -1,1 +1,1 @@
-from .views import app, submit_queue,crawl_queue
+from .views import app

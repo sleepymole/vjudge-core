@@ -1,9 +1,19 @@
-import random
 import os
+import random
 
 SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.dirname(__file__) + '/data.sqlite'
 
 OJ_CONFIG = os.path.dirname(__file__) + '/accounts.json'
+
+REDIS_CONFIG = {
+    'host': 'localhost',
+    'port': 6379,
+    'queue': {
+        'submit_queue': 'vjudge-core-task-submitter',
+        'status_queue': 'vjudge-core-task-crawler-status',
+        'problem_queue': 'vjudge-core-task-crawler-problem'
+    }
+}
 
 USER_AGENTS = [
     "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; AcooBrowser; .NET CLR 1.1.4322; .NET CLR 2.0.50727)",

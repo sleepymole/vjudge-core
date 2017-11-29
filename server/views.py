@@ -1,14 +1,18 @@
+import json
 from datetime import datetime, timedelta
-from queue import Queue
 
+import redis
 from flask import Flask, jsonify, request, abort, url_for
 from sqlalchemy import and_
 
+from config import REDIS_CONFIG
 from vjudge.models import db, Submission, Problem
 
 app = Flask(__name__)
-submit_queue = Queue()
-crawl_queue = Queue()
+
+redis_con = redis.StrictRedis(host=REDIS_CONFIG['host'], port=REDIS_CONFIG['port'])
+submit_queue = REDIS_CONFIG['queue']['submit_queue']
+problem_queue = REDIS_CONFIG['queue']['problem_queue']
 
 
 @app.route('/problems/')
@@ -42,13 +46,13 @@ def get_problem(oj_name, problem_id):
     if problem is None:
         abort(404)
     if datetime.utcnow() - timedelta(days=1) > problem.last_update:
-        crawl_queue.put((oj_name, problem_id))
+        redis_con.rpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
     return jsonify(problem.to_json())
 
 
 @app.route('/problems/<oj_name>/<problem_id>', methods=['POST'])
 def update_problem(oj_name, problem_id):
-    crawl_queue.put((oj_name, problem_id))
+    redis_con.rpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
     return jsonify({'url': url_for('get_problem', oj_name=oj_name, problem_id=problem_id)})
 
 
@@ -66,7 +70,7 @@ def submit_problem():
                             language=language, source_code=source_code)
     db.session.add(submission)
     db.session.commit()
-    submit_queue.put(submission.id)
+    redis_con.rpush(submit_queue, submission.id)
     url = url_for('get_submission', id=submission.id, _external=True)
     return jsonify({'id': submission.id, 'url': url})
 
