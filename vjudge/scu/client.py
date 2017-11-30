@@ -1,10 +1,12 @@
-import requests
-import sqlite3
-import re
 import os
+import re
+import sqlite3
+
+import requests
 from bs4 import BeautifulSoup
-from ..base import BaseClient
+
 from .. import exceptions
+from ..base import BaseClient
 
 base_url = 'http://acm.scu.edu.cn/soj'
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -15,10 +17,14 @@ class SOJClient(BaseClient):
     def __init__(self, auth=None, **kwargs):
         super().__init__()
         self.auth = auth
+        self.name = 'scu'
         self.timeout = kwargs.get('timeout', 5)
         if auth is not None:
             self.username, self.password = auth
             self.login(self.username, self.password)
+
+    def get_name(self):
+        return self.name
 
     def login(self, username, password):
         url = base_url + '/login.action'
@@ -49,6 +55,9 @@ class SOJClient(BaseClient):
         if re.search('Please login first', r.text):
             return False
         return True
+
+    def get_user_id(self):
+        return self.username
 
     def update_cookies(self):
         if self.auth is None:

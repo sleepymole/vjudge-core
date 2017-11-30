@@ -1,4 +1,4 @@
-from vjudge.base import VJudge
+from vjudge.main import VJudge
 
 vjudge = VJudge()
 

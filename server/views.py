@@ -46,13 +46,13 @@ def get_problem(oj_name, problem_id):
     if problem is None:
         abort(404)
     if datetime.utcnow() - timedelta(days=1) > problem.last_update:
-        redis_con.rpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
+        redis_con.lpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
     return jsonify(problem.to_json())
 
 
 @app.route('/problems/<oj_name>/<problem_id>', methods=['POST'])
 def update_problem(oj_name, problem_id):
-    redis_con.rpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
+    redis_con.lpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
     return jsonify({'url': url_for('get_problem', oj_name=oj_name, problem_id=problem_id)})
 
 
@@ -70,7 +70,7 @@ def submit_problem():
                             language=language, source_code=source_code)
     db.session.add(submission)
     db.session.commit()
-    redis_con.rpush(submit_queue, submission.id)
+    redis_con.lpush(submit_queue, submission.id)
     url = url_for('get_submission', id=submission.id, _external=True)
     return jsonify({'id': submission.id, 'url': url})
 

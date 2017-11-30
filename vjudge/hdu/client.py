@@ -1,9 +1,11 @@
-import requests
 import re
+
+import requests
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString
-from ..base import BaseClient
+
 from .. import exceptions
+from ..base import BaseClient
 
 base_url = 'http://acm.hdu.edu.cn'
 
@@ -18,6 +20,7 @@ page_titles = {'Problem Description': 'description', 'Input': 'input', 'Output':
 class HDUClient(BaseClient):
     def __init__(self, auth=None, **kwargs):
         super().__init__()
+        self.name = 'hdu'
         if 'contest_id' in kwargs:
             self.client_type = 'contest'
             self.contest_id = kwargs['contest_id']
@@ -28,6 +31,9 @@ class HDUClient(BaseClient):
         if auth is not None:
             self.username, self.password = auth
             self.login(self.username, self.password)
+
+    def get_name(self):
+        return self.name
 
     def login(self, username, password):
         url = self._get_login_url()
@@ -55,6 +61,9 @@ class HDUClient(BaseClient):
         if re.search('Sign In Your Account', r.text):
             return False
         return True
+
+    def get_user_id(self):
+        return self.username
 
     def update_cookies(self):
         if self.auth is None:
