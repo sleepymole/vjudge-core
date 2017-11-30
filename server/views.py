@@ -18,20 +18,21 @@ problem_queue = REDIS_CONFIG['queue']['problem_queue']
 @app.route('/problems/')
 def get_problems():
     page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
     oj_name = request.args.get('oj_name', '%')
     problem_id = request.args.get('problem_id', '%')
     pagination = Problem.query.filter(
         and_(Problem.oj_name.like(oj_name),
              Problem.problem_id.like(problem_id))). \
-        paginate(page=page, error_out=False)
+        paginate(page=page, per_page=per_page, error_out=False)
     problems = pagination.items
     page = pagination.page
     prev = None
     if pagination.has_prev:
-        prev = url_for('get_problems', page=page - 1, _external=True)
+        prev = url_for('get_problems', page=page - 1, per_page=per_page, _external=True)
     next = None
     if pagination.has_next:
-        next = url_for('get_problems', page=page + 1, _external=True)
+        next = url_for('get_problems', page=page + 1, per_page=per_page, _external=True)
     return jsonify({
         'problems': [p.summary() for p in problems],
         'prev': prev,
