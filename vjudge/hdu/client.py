@@ -46,7 +46,7 @@ class HDUClient(BaseClient):
             r = self._session.post(url, data, timeout=self.timeout)
         except requests.exceptions.RequestException:
             raise exceptions.ConnectionError
-        if r.text:
+        if re.search('Sign In Your Account', r.text):
             raise exceptions.LoginError
         self.auth = (username, password)
         self.username = username
