@@ -198,7 +198,7 @@ class VJudge(object):
         SubmitQueueHandler(self.submit_queues, pool=self.pool, daemon=True).start()
         ProblemQueueHandler(self.problem_queues, pool=self.pool, daemon=True).start()
         while True:
-            time.sleep(10)
+            time.sleep(3600)
             for oj_name in self.accounts:
                 if oj_name not in self.available_ojs:
                     self._add_judge(oj_name)
