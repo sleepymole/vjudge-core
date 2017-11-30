@@ -155,7 +155,7 @@ class HDUClient(BaseClient):
             return base_url + '/contests/contest_status.php?cid={}&pid={}&user={}&lang=0&status=0'. \
                 format(self.contest_id, problem_id, user_id)
         else:
-            return base_url + '/status.php?first={}&pid={}&pid={}&lang=0&status=0'. \
+            return base_url + '/status.php?first={}&pid={}&user={}&lang=0&status=0'. \
                 format(run_id, problem_id, user_id)
 
     def _get_problem_url(self, problem_id):
