@@ -141,7 +141,9 @@ class ProblemQueueHandler(threading.Thread):
             result = self.redis_con.brpop(self.redis_key, timeout=3600)
             if result:
                 try:
-                    oj_name, problem_id = json.loads(result[1].decode())
+                    data = json.loads(result[1].decode())
+                    oj_name = data.get('oj_name')
+                    problem_id = data.get('problem_id')
                 except json.decoder.JSONDecodeError:
                     continue
                 que = self.queues.get(oj_name)
@@ -191,7 +193,7 @@ class VJudge(object):
         SubmitQueueHandler(self.submit_queues, pool=self.pool, daemon=True).start()
         ProblemQueueHandler(self.problem_queues, pool=self.pool, daemon=True).start()
         while True:
-            time.sleep(3600)
+            time.sleep(10)
             for oj_name in self.accounts:
                 if oj_name not in self.available_ojs:
                     self._add_judge(oj_name)

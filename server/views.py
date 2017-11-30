@@ -40,22 +40,6 @@ def get_problems():
     })
 
 
-@app.route('/problems/<oj_name>/<problem_id>')
-def get_problem(oj_name, problem_id):
-    problem = Problem.query.filter_by(oj_name=oj_name, problem_id=problem_id).first()
-    if problem is None:
-        abort(404)
-    if datetime.utcnow() - timedelta(days=1) > problem.last_update:
-        redis_con.lpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
-    return jsonify(problem.to_json())
-
-
-@app.route('/problems/<oj_name>/<problem_id>', methods=['POST'])
-def update_problem(oj_name, problem_id):
-    redis_con.lpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
-    return jsonify({'url': url_for('get_problem', oj_name=oj_name, problem_id=problem_id)})
-
-
 @app.route('/problems/', methods=['POST'])
 def submit_problem():
     oj_name = request.form.get('oj_name')
@@ -75,7 +59,23 @@ def submit_problem():
     return jsonify({'id': submission.id, 'url': url})
 
 
-@app.route('/submissions/<id>')
+@app.route('/problems/<oj_name>/<problem_id>')
+def get_problem(oj_name, problem_id):
+    problem = Problem.query.filter_by(oj_name=oj_name, problem_id=problem_id).first()
+    if problem is None:
+        abort(404)
+    if datetime.utcnow() - timedelta(days=1) > problem.last_update:
+        redis_con.lpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
+    return jsonify(problem.to_json())
+
+
+@app.route('/problems/<oj_name>/<problem_id>', methods=['POST'])
+def update_problem(oj_name, problem_id):
+    redis_con.lpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
+    return jsonify({'url': url_for('get_problem', oj_name=oj_name, problem_id=problem_id, _external=True)})
+
+
+@app.route('/submissions/<id>', methods=['GET', 'POST'])
 def get_submission(id):
     submission = Submission.query.get(id)
     if submission is None:
