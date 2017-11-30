@@ -19,15 +19,15 @@ class BaseClient(metaclass=ABCMeta):
         pass
 
     @abstractclassmethod
+    def get_user_id(self):
+        pass
+
+    @abstractclassmethod
     def login(self, username, password):
         pass
 
     @abstractclassmethod
     def check_login(self):
-        pass
-
-    @abstractclassmethod
-    def get_user_id(self):
         pass
 
     @abstractclassmethod
