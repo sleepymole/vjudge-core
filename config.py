@@ -10,7 +10,7 @@ REDIS_CONFIG = {
     'port': 6379,
     'queue': {
         'submit_queue': 'vjudge-core-task-submitter',
-        'problem_queue': 'vjudge-core-task-crawler-problem'
+        'problem_queue': 'vjudge-core-task-problem-crawler'
     }
 }
 

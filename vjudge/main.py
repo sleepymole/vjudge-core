@@ -12,6 +12,8 @@ from config import REDIS_CONFIG, OJ_CONFIG
 from .base import get_client, exceptions
 from .models import db, Submission, Problem
 
+logging.basicConfig(level=logging.INFO)
+
 
 class Submitter(threading.Thread):
     def __init__(self, client, submit_queue, status_queue, daemon=False):
@@ -31,6 +33,7 @@ class Submitter(threading.Thread):
             except (exceptions.SubmitError, exceptions.ConnectionError):
                 submission.verdict = 'Submit Failed'
                 db.session.commit()
+                logging.info('problem submit: {}'.format(submission.to_json()))
             except exceptions.LoginExpired:
                 try:
                     self.client.update_cookies()
@@ -38,11 +41,13 @@ class Submitter(threading.Thread):
                 except exceptions.ConnectionError:
                     submission.verdict = 'Submit Failed'
                     db.session.commit()
+                    logging.info('problem submit: {}'.format(submission.to_json()))
             else:
                 submission.run_id = run_id
                 submission.user_id = self.user_id
                 submission.verdict = 'Being Judged'
                 db.session.commit()
+                logging.info('problem submit: {}'.format(submission.to_json()))
                 self.status_queue.put(submission.id)
 
 

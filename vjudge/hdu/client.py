@@ -212,6 +212,8 @@ class HDUClient(BaseClient):
                     verdict = result[2]
                     exe_time = int(result[4].replace('MS', ''))
                     exe_mem = int(result[5].replace('K', ''))
+                    if re.search('Runtime Error', verdict):
+                        verdict = 'Runtime Error'
                     return verdict, exe_time, exe_mem
         except (AttributeError, IndexError, ValueError):
             pass
