@@ -1,5 +1,7 @@
-from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
+
+from sqlalchemy import Column, Integer, String, DateTime
+
 from . import db
 
 
@@ -51,6 +53,7 @@ class Problem(db.Model):
         problem_json = {
             'oj_name': self.oj_name,
             'problem_id': self.problem_id,
+            'last_update': self.last_update.timestamp(),
             'title': self.title,
             'description': self.description,
             'input': self.input,
