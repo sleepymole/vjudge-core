@@ -4,3 +4,4 @@ data.sqlite
 tests/
 venv/
 accounts.json
+data.sqlite-journal

@@ -159,7 +159,7 @@ class ProblemQueueHandler(threading.Thread):
 
     def refresh_problem(self):
         outdated_problems = Problem.query.filter(
-            datetime.utcnow() - Problem.last_update > timedelta(days=1)).all()
+            datetime.utcnow() - timedelta(days=1) > Problem.last_update).all()
         for p in outdated_problems:
             que = self.queues.get(p.oj_name)
             if que:
