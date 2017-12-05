@@ -35,6 +35,11 @@ class HDUClient(BaseClient):
     def get_name(self):
         return self.name
 
+    def get_user_id(self):
+        if self.auth is None:
+            raise exceptions.LoginRequired
+        return self.username
+
     def login(self, username, password):
         url = self._get_login_url()
         data = {
@@ -61,9 +66,6 @@ class HDUClient(BaseClient):
         if re.search('Sign In Your Account', r.text):
             return False
         return True
-
-    def get_user_id(self):
-        return self.username
 
     def update_cookies(self):
         if self.auth is None:

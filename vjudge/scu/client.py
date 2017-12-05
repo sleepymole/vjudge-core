@@ -26,6 +26,11 @@ class SOJClient(BaseClient):
     def get_name(self):
         return self.name
 
+    def get_user_id(self):
+        if self.auth is None:
+            raise exceptions.LoginRequired
+        return self.username
+
     def login(self, username, password):
         url = base_url + '/login.action'
         data = {
@@ -55,9 +60,6 @@ class SOJClient(BaseClient):
         if re.search('Please login first', r.text):
             return False
         return True
-
-    def get_user_id(self):
-        return self.username
 
     def update_cookies(self):
         if self.auth is None:
