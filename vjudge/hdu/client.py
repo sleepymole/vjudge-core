@@ -173,7 +173,8 @@ class HDUClient(BaseClient):
         pattern = r'Time Limit:.*?[0-9]*/([0-9]*).*?MS.*?\(Java/Others\).*?' \
                   'Memory Limit:.*?[0-9]*/([0-9]*).*?K.*?\(Java/Others\)'
         limit = re.search(pattern, text)
-        text = text.replace('src=../../../data/images', 'src=http://acm.hdu.edu.cn/data/images')
+        text = text.replace('../../../data/images', 'http://acm.hdu.edu.cn/data/images')
+        text = text.replace('../../data/images', 'http://acm.hdu.edu.cn/data/images')
         if limit:
             result['time_limit'] = limit.group(1)
             result['mem_limit'] = limit.group(2)
