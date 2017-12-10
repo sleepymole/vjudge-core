@@ -12,7 +12,6 @@ base_url = 'http://acm.hdu.edu.cn'
 language_id = {'G++': '0', 'GCC': '1', 'C++': '2',
                'C': '3', 'Pascal': '4', 'Java': '5', 'C#': '6'}
 
-titles = ['Problem Description', 'Input', 'Output', 'Sample Input', 'Sample Output']
 page_titles = {'Problem Description': 'description', 'Input': 'input', 'Output': 'output',
                'Sample Input': 'sample_input', 'Sample Output': 'sample_output'}
 
@@ -194,7 +193,7 @@ class HDUClient(BaseClient):
                     limit += 1
                 res = re.match('<div.*?>(.*)</div>$', str(tag), re.DOTALL)
                 if res:
-                    result[title] = res.group(1)
+                    result[page_titles[title]] = res.group(1)
         return result
 
     @staticmethod
