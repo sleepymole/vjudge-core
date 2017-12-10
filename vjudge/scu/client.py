@@ -69,7 +69,7 @@ class SOJClient(BaseClient):
     def get_problem(self, problem_id):
         url = base_url + '/problem.action?id={}'.format(problem_id)
         try:
-            r = self._session.get(url)
+            r = self._session.get(url, timeout=self.timeout)
         except requests.exceptions.RequestException:
             raise exceptions.ConnectionError
         if re.search('No such problem', r.text):

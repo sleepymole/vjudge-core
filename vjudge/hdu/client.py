@@ -75,7 +75,7 @@ class HDUClient(BaseClient):
     def get_problem(self, problem_id):
         url = self._get_problem_url(problem_id)
         try:
-            r = self._session.get(url)
+            r = self._session.get(url, timeout=self.timeout)
         except requests.exceptions.RequestException:
             raise exceptions.ConnectionError
         return self._parse_problem(r.text)
@@ -184,24 +184,17 @@ class HDUClient(BaseClient):
             if result['title'] == 'System Message':
                 return
         tags = soup.find_all('div', 'panel_title', align='left')
-        index = 0
-        for title in titles:
-            while index < len(tags) and tags[index].string != title:
-                index += 1
-            if index >= len(tags):
-                break
-            tag = tags[index].next_sibling
-            limit = 0
-            while tag is not None and type(tag) is NavigableString and limit < 3:
-                tag = tag.next_sibling
-                limit += 1
-            items = []
-            for i in tag.contents:
-                if type(i) is NavigableString:
-                    items.append(str(i))
-                else:
-                    items.append(i.prettify())
-            result[page_titles[title]] = ''.join(items)
+        for t in tags:
+            title = t.string
+            if title in page_titles:
+                tag = t.next_sibling
+                limit = 0
+                while tag is not None and type(tag) is NavigableString and limit < 3:
+                    tag = tag.next_sibling
+                    limit += 1
+                res = re.match('<div.*?>(.*)</div>$', str(tag), re.DOTALL)
+                if res:
+                    result[title] = res.group(1)
         return result
 
     @staticmethod
