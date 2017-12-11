@@ -188,9 +188,11 @@ class HDUClient(BaseClient):
             if title in page_titles:
                 tag = t.next_sibling
                 limit = 0
-                while tag is not None and type(tag) is NavigableString and limit < 3:
+                while tag and type(tag) is NavigableString and limit < 3:
                     tag = tag.next_sibling
                     limit += 1
+                if tag is None or type(tag) is NavigableString:
+                    continue
                 res = re.match('<div.*?>(.*)</div>$', str(tag), re.DOTALL)
                 if res:
                     result[page_titles[title]] = res.group(1)
