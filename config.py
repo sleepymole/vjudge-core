@@ -1,7 +1,8 @@
 import os
 import random
 
-SQLALCHEMY_DATABASE_URI = 'sqlite:///' + os.path.dirname(__file__) + '/data.sqlite'
+SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
+                          'sqlite:///' + os.path.dirname(__file__) + '/data.sqlite'
 
 OJ_CONFIG = os.path.dirname(__file__) + '/accounts.json'
 
