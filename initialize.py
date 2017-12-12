@@ -1,15 +1,17 @@
 import logging
+from datetime import datetime
+
+from vjudge import exceptions
+from vjudge.hdu.client import HDUClient
 from vjudge.models import db, Problem
 from vjudge.scu.client import SOJClient
-from vjudge.hdu.client import HDUClient
-from vjudge import exceptions
-from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 
 
 def crawler(oj_name, client, start, end):
-    for problem_id in range(start, end):
+    for i in range(start, end):
+        problem_id = str(i)
         try:
             result = client.get_problem(problem_id)
         except exceptions.ConnectionError:
