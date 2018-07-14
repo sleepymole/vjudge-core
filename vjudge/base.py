@@ -1,5 +1,5 @@
 import logging
-from abc import ABCMeta, abstractclassmethod
+from abc import abstractmethod, ABC
 
 import requests
 
@@ -9,40 +9,40 @@ from . import exceptions
 logging.basicConfig(level=logging.INFO)
 
 
-class BaseClient(metaclass=ABCMeta):
+class BaseClient(ABC):
     def __init__(self):
         self._session = requests.session()
         self._session.headers.update(get_header())
 
-    @abstractclassmethod
+    @abstractmethod
     def get_name(self):
         pass
 
-    @abstractclassmethod
+    @abstractmethod
     def get_user_id(self):
         pass
 
-    @abstractclassmethod
+    @abstractmethod
     def login(self, username, password):
         pass
 
-    @abstractclassmethod
+    @abstractmethod
     def check_login(self):
         pass
 
-    @abstractclassmethod
+    @abstractmethod
     def update_cookies(self):
         pass
 
-    @abstractclassmethod
+    @abstractmethod
     def get_problem(self, problem_id):
         pass
 
-    @abstractclassmethod
+    @abstractmethod
     def submit_problem(self, problem_id, language, source_code):
         pass
 
-    @abstractclassmethod
+    @abstractmethod
     def get_submit_status(self, run_id, **kwargs):
         pass
 
