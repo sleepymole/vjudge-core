@@ -17,6 +17,8 @@ LANG_ID = {'G++': '0', 'GCC': '1', 'C++': '2',
 PAGE_TITLES = {'Problem Description': 'description', 'Input': 'input', 'Output': 'output',
                'Sample Input': 'sample_input', 'Sample Output': 'sample_output'}
 
+MAX_VOL = 100
+
 
 class _UniClient(BaseClient):
     def __init__(self, auth=None, client_type='practice', contest_id=0, timeout=5):
@@ -71,6 +73,10 @@ class _UniClient(BaseClient):
         except requests.exceptions.RequestException:
             raise exceptions.ConnectionError
         return self._parse_problem(r.text)
+
+    @abstractmethod
+    def get_problem_list(self):
+        pass
 
     def submit_problem(self, problem_id, language, source_code):
         if self.auth is None:
@@ -248,6 +254,39 @@ class HDUClient(_UniClient):
             return False
         return True
 
+    def get_problem_list(self):
+        url = f'{BASE_URL}/listproblem.php'
+        try:
+            r = self._session.get(url, timeout=self.timeout)
+        except requests.exceptions.RequestException:
+            raise exceptions.ConnectionError
+        result = []
+        ids = self.__class__._parse_problem_id(r.text)
+        result += ids
+        vol = 2
+        while ids and vol < MAX_VOL:
+            ex_url = url + f'?vol={vol}'
+            vol += 1
+            try:
+                r = self._session.get(ex_url, timeout=self.timeout)
+            except requests.exceptions.RequestException:
+                break
+            ids = self.__class__._parse_problem_id(r.text)
+            if not ids:
+                break
+            result += ids
+        result.sort()
+        return result
+
+    @staticmethod
+    def _parse_problem_id(text):
+        ids = []
+        pattern = re.compile(r'p\([^,()]+?,([^,()]+?)(,[^,()]+?){4}\);', re.DOTALL)
+        res = re.findall(pattern, text)
+        if res:
+            ids = [x[0] for x in res]
+        return ids
+
 
 class HDUContestClient(_UniClient):
     def __init__(self, auth=None, contest_id=None, **kwargs):
@@ -262,3 +301,31 @@ class HDUContestClient(_UniClient):
 
     def check_login(self):
         return True
+
+    def get_problem_list(self):
+        url = f'{BASE_URL}/contests/contest_show.php?cid={self.contest_id}'
+        try:
+            r = self._session.get(url, timeout=self.timeout)
+        except requests.exceptions.RequestException:
+            raise exceptions.ConnectionError
+        result = self.__class__._parse_problem_id(r.text)
+        result.sort()
+        return result
+
+    @staticmethod
+    def _parse_problem_id(text):
+        res = []
+        soup = BeautifulSoup(text, 'lxml')
+        tables = soup.find_all('table')
+        table = None
+        for t in tables:
+            if re.search(r'Solved.*Title.*Ratio', str(t), re.DOTALL):
+                table = t
+        if table is None:
+            return res
+        tags = table.find_all('tr', align="center")
+        for tag in tags:
+            tds = [x.text for x in tag.find_all('td')]
+            if len(tds) >= 2:
+                res.append(tds[1])
+        return res

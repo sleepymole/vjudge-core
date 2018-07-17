@@ -38,6 +38,10 @@ class BaseClient(ABC):
         pass
 
     @abstractmethod
+    def get_problem_list(self):
+        pass
+
+    @abstractmethod
     def submit_problem(self, problem_id, language, source_code):
         pass
 

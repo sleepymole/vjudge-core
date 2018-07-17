@@ -80,6 +80,9 @@ class SOJClient(BaseClient):
             return
         return {'title': title}
 
+    def get_problem_list(self):
+        return []
+
     def submit_problem(self, problem_id, language, source_code):
         if self.auth is None:
             raise exceptions.LoginRequired
