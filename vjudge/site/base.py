@@ -48,3 +48,36 @@ class BaseClient(ABC):
     @abstractmethod
     def get_submit_status(self, run_id, **kwargs):
         pass
+
+
+class ContestInfo(object):
+    def __init__(self, contest_id, title='', public=True, status='Pending',
+                 start_time=0, end_time=0, problem_list=None):
+        self.contest_id = contest_id
+        self.title = title
+        self.public = public
+        self.status = status
+        self.start_time = start_time
+        self.end_time = end_time
+        self.problem_list = problem_list or []
+
+    def __repr__(self):
+        return (f'<ContestInfo(contest_id={self.contest_id}, title="{self.title}", '
+                f'public={self.public}, status={self.status})>')
+
+
+class ContestClient(ABC):
+    def __init__(self):
+        pass
+
+    @abstractmethod
+    def get_contest_id(self):
+        pass
+
+    @abstractmethod
+    def get_contest_info(self):
+        pass
+
+    @abstractmethod
+    def refresh_contest_info(self):
+        pass

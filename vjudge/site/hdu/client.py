@@ -1,13 +1,14 @@
 import re
 from abc import abstractmethod
 from urllib.parse import urljoin
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString
 
 from .. import exceptions
-from ..base import BaseClient
+from ..base import BaseClient, ContestClient, ContestInfo
 
 BASE_URL = 'http://acm.hdu.edu.cn'
 
@@ -21,7 +22,7 @@ MAX_VOL = 100
 
 
 class _UniClient(BaseClient):
-    def __init__(self, auth=None, client_type='practice', contest_id=0, timeout=5):
+    def __init__(self, auth=None, client_type='practice', contest_id='0', timeout=5):
         super().__init__()
         self.auth = auth
         self.client_type = client_type
@@ -288,29 +289,66 @@ class HDUClient(_UniClient):
         return ids
 
 
-class HDUContestClient(_UniClient):
+class HDUContestClient(_UniClient, ContestClient):
     def __init__(self, auth=None, contest_id=None, **kwargs):
         timeout = kwargs.get('timeout', 5)
         if contest_id is None:
             raise exceptions.JudgeException('You must specific a contest id')
-        super().__init__(auth, 'contest', contest_id, timeout)
+        super().__init__(auth, 'contest', str(contest_id), timeout)
         self.name = f'hdu_ct_{contest_id}'
+        self._contest_info = ContestInfo(self.contest_id)
+        self.refresh_contest_info()
 
     def get_name(self):
         return self.name
 
+    def get_contest_id(self):
+        return self.contest_id
+
     def check_login(self):
         return True
 
+    def get_contest_info(self):
+        return self._contest_info
+
     def get_problem_list(self):
+        return self._contest_info.problem_list
+
+    def refresh_contest_info(self):
         url = f'{BASE_URL}/contests/contest_show.php?cid={self.contest_id}'
         try:
             r = self._session.get(url, timeout=self.timeout)
         except requests.exceptions.RequestException:
             raise exceptions.ConnectionError
-        result = self.__class__._parse_problem_id(r.text)
-        result.sort()
-        return result
+        if re.search(r'System Message', r.text):
+            raise exceptions.ConnectionError(f'Contest {self.contest_id} not exists')
+        self._contest_info.problem_list = self.__class__._parse_problem_id(r.text)
+        soup = BeautifulSoup(r.text, 'lxml')
+        h1 = self._contest_info.title = soup.h1
+        if h1:
+            self._contest_info.title = h1.get_text()
+        divs = soup.find_all('div')
+        pattern = re.compile(r'Start.*Time.*Contest.*Type.*Contest.*Status', re.DOTALL)
+        div = None
+        for d in divs:
+            if re.search(pattern, str(d)):
+                div = d
+        if not div:
+            return
+        r = re.search(r'Start *?Time *?: *?([0-9]{4})-([0-9]{2})-([0-9]{2}) *?([0-9]{2}):([0-9]{2}):([0-9]{2})',
+                      div.get_text())
+        if r:
+            self._contest_info.start_time = self._to_utc_timestamp(r.groups())
+        r = re.search(r'End *?Time *?: *?([0-9]{4})-([0-9]{2})-([0-9]{2}) *?([0-9]{2}):([0-9]{2}):([0-9]{2})',
+                      div.get_text())
+        if r:
+            self._contest_info.end_time = self._to_utc_timestamp(r.groups())
+        r = re.search(r'Contest *?Type *?:(.*?)Contest *?Status', div.get_text())
+        if r and 'Public' not in r.groups()[0].strip():
+            self._contest_info.public = False
+        r = re.search(r'Contest *?Status.*?:(.*?)Current.*?Server.*?Time', div.get_text())
+        if r:
+            self._contest_info.status = r.groups()[0].strip()
 
     @staticmethod
     def _parse_problem_id(text):
@@ -329,3 +367,12 @@ class HDUContestClient(_UniClient):
             if len(tds) >= 2:
                 res.append(tds[1])
         return res
+
+    @staticmethod
+    def _to_utc_timestamp(d):
+        try:
+            d = [int(x) for x in d]
+        except ValueError:
+            return 0
+        utc = datetime.utcfromtimestamp(datetime(*d).timestamp())
+        return utc.timestamp()
