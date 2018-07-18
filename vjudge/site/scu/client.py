@@ -8,6 +8,8 @@ from bs4 import BeautifulSoup
 from .. import exceptions
 from ..base import BaseClient
 
+__all__ = ('SOJClient',)
+
 base_url = 'http://acm.scu.edu.cn/soj'
 base_dir = os.path.abspath(os.path.dirname(__file__))
 db = sqlite3.connect(os.path.join(base_dir, 'captcha.db'), check_same_thread=False)

@@ -10,6 +10,8 @@ from bs4.element import NavigableString
 from .. import exceptions
 from ..base import BaseClient, ContestClient, ContestInfo
 
+__all__ = ('HDUClient', 'HDUContestClient')
+
 BASE_URL = 'http://acm.hdu.edu.cn'
 
 LANG_ID = {'G++': '0', 'GCC': '1', 'C++': '2',

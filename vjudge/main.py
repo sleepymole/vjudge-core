@@ -9,7 +9,7 @@ import redis
 from sqlalchemy import func
 
 from config import REDIS_CONFIG, OJ_CONFIG
-from .base import get_client, exceptions
+from .site import get_normal_client, exceptions
 from .models import db, Submission, Problem
 
 logging.basicConfig(level=logging.INFO)
@@ -209,20 +209,23 @@ class VJudge(object):
         available = False
         for username in self.accounts[oj_name]:
             password = self.accounts[oj_name][username]
-            client = get_client(oj_name, auth=(username, password))
-            if client is not None:
-                logging.info("user '{}' log in to {} successfully".format(username, oj_name))
-                if not available:
-                    self.submit_queues[oj_name] = Queue()
-                    self.problem_queues[oj_name] = Queue()
-                    self.status_queues[oj_name] = Queue()
-                    available = True
-                Submitter(client, self.submit_queues.get(oj_name),
-                          self.status_queues.get(oj_name), daemon=True).start()
+            try:
+                client = get_normal_client(oj_name, auth=(username, password))
+            except exceptions.JudgeException as e:
+                logging.error(e)
+                continue
+            logging.info("user '{}' log in to {} successfully".format(username, oj_name))
+            if not available:
+                self.submit_queues[oj_name] = Queue()
+                self.problem_queues[oj_name] = Queue()
+                self.status_queues[oj_name] = Queue()
+                available = True
+            Submitter(client, self.submit_queues.get(oj_name),
+                      self.status_queues.get(oj_name), daemon=True).start()
         if available:
             self.available_ojs.append(oj_name)
-            StatusCrawler(get_client(oj_name),
+            StatusCrawler(get_normal_client(oj_name),
                           self.status_queues.get(oj_name), daemon=True).start()
-            ProblemCrawler(get_client(oj_name),
+            ProblemCrawler(get_normal_client(oj_name),
                            self.problem_queues.get(oj_name), daemon=True).start()
         return available

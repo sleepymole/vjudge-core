@@ -1,1 +1,3 @@
-from .client import HDUClient, HDUContestClient
+from .client import *
+
+__all__ = client.__all__
