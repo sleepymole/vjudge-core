@@ -316,6 +316,14 @@ class HDUContestClient(_UniClient, ContestClient):
     def get_problem_list(self):
         return self._contest_info.problem_list
 
+    def submit_problem(self, problem_id, language, source_code):
+        self.refresh_contest_info()
+        if self._contest_info.status == 'Pending':
+            raise exceptions.SubmitError('Contest has not begun')
+        if self._contest_info.status == 'Ended':
+            raise exceptions.SubmitError('Contest is ended')
+        return super().submit_problem(problem_id, language, source_code)
+
     def refresh_contest_info(self):
         url = f'{BASE_URL}/contests/contest_show.php?cid={self.contest_id}'
         try:
