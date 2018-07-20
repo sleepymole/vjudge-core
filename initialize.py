@@ -1,10 +1,8 @@
 import logging
 from datetime import datetime
 
-from vjudge import exceptions
-from vjudge.hdu.client import HDUClient
+from vjudge.site import exceptions, HDUClient, SOJClient
 from vjudge.models import db, Problem
-from vjudge.scu.client import SOJClient
 
 logging.basicConfig(level=logging.INFO)
 
