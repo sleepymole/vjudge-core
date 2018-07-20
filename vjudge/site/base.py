@@ -81,3 +81,8 @@ class ContestClient(ABC):
     @abstractmethod
     def refresh_contest_info(self):
         pass
+
+    @classmethod
+    @abstractmethod
+    def get_recent_contest(cls):
+        pass

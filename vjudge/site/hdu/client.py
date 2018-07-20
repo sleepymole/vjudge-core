@@ -184,8 +184,9 @@ class _UniClient(BaseClient):
         # replace relative url
         img_tags = soup.find_all('img')
         for tag in img_tags:
-            img_url = urljoin(self._get_problem_url(''), tag['src'])
-            tag['src'] = img_url
+            if hasattr(tag, 'src'):
+                img_url = urljoin(self._get_problem_url(''), tag['src'])
+                tag['src'] = img_url
         if soup.h1:
             result['title'] = soup.h1.text
             if result['title'] == 'System Message':
@@ -348,17 +349,47 @@ class HDUContestClient(_UniClient, ContestClient):
         r = re.search(r'Start *?Time *?: *?([0-9]{4})-([0-9]{2})-([0-9]{2}) *?([0-9]{2}):([0-9]{2}):([0-9]{2})',
                       div.get_text())
         if r:
-            self._contest_info.start_time = self._to_utc_timestamp(r.groups())
+            self._contest_info.start_time = self._to_timestamp(r.groups())
         r = re.search(r'End *?Time *?: *?([0-9]{4})-([0-9]{2})-([0-9]{2}) *?([0-9]{2}):([0-9]{2}):([0-9]{2})',
                       div.get_text())
         if r:
-            self._contest_info.end_time = self._to_utc_timestamp(r.groups())
+            self._contest_info.end_time = self._to_timestamp(r.groups())
         r = re.search(r'Contest *?Type *?:(.*?)Contest *?Status', div.get_text())
         if r and 'Public' not in r.groups()[0].strip():
             self._contest_info.public = False
         r = re.search(r'Contest *?Status.*?:(.*?)Current.*?Server.*?Time', div.get_text())
         if r:
             self._contest_info.status = r.groups()[0].strip()
+
+    @classmethod
+    def get_recent_contest(cls):
+        from ..base import get_header
+        session = requests.session()
+        session.headers.update(get_header())
+        url = 'http://acm.hdu.edu.cn/contests/contest_list.php'
+        try:
+            r = session.get(url, timeout=5)
+        except requests.exceptions.RequestException:
+            raise exceptions.ConnectionError
+        soup = BeautifulSoup(r.text, 'lxml')
+        table = soup.find('table', 'table_text')
+        if table is None:
+            return []
+        tags = table.find_all('tr', align='center')
+        result = []
+        for tag in tags:
+            tds = tag.find_all('td')
+            tds = [x.text.strip() for x in tds]
+            if len(tds) < 6:
+                continue
+            contest_info = ContestInfo(contest_id=tds[0], title=tds[1], status=tds[4])
+            r = re.search('([0-9]{4})-([0-9]{2})-([0-9]{2}) *?([0-9]{2}):([0-9]{2}):([0-9]{2})', tds[2])
+            if r:
+                contest_info.start_time = cls._to_timestamp(r.groups())
+            if tds[3] != 'Public':
+                contest_info.public = False
+            result.append(contest_info)
+        return result
 
     @staticmethod
     def _parse_problem_id(text):
@@ -379,7 +410,7 @@ class HDUContestClient(_UniClient, ContestClient):
         return res
 
     @staticmethod
-    def _to_utc_timestamp(d):
+    def _to_timestamp(d):
         try:
             d = [int(x) for x in d]
         except ValueError:
