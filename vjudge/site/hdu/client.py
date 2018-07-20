@@ -366,7 +366,7 @@ class HDUContestClient(_UniClient, ContestClient):
         from ..base import get_header
         session = requests.session()
         session.headers.update(get_header())
-        url = 'http://acm.hdu.edu.cn/contests/contest_list.php'
+        url = f'{BASE_URL}/contests/contest_list.php'
         try:
             r = session.get(url, timeout=5)
         except requests.exceptions.RequestException:
