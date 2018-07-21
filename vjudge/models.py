@@ -1,6 +1,5 @@
-from datetime import datetime
-
-from sqlalchemy import Column, Integer, String, DateTime
+from datetime import datetime, timezone
+from sqlalchemy import Column, Integer, Boolean, String, DateTime, UniqueConstraint
 
 from . import db
 
@@ -20,7 +19,7 @@ class Submission(db.Model):
     time_stamp = Column(DateTime, default=datetime.utcnow)
 
     def to_json(self):
-        json_submission = {
+        submission_json = {
             'id': self.id,
             'oj_name': self.oj_name,
             'problem_id': self.problem_id,
@@ -28,7 +27,7 @@ class Submission(db.Model):
             'exe_time': self.exe_time,
             'exe_mem': self.exe_mem
         }
-        return json_submission
+        return submission_json
 
     def __repr__(self):
         return '<Submission(id={}, user_id={}, oj_name={}, problem_id={} verdict={})>'. \
@@ -74,4 +73,35 @@ class Problem(db.Model):
         return summary_json
 
     def __repr__(self):
-        return '<Problem<{} {}: {}>'.format(self.oj_name, self.problem_id, self.title)
+        return f'<Problem(oj_name={self.oj_name}, problem_id={self.problem_id}, title={self.title})>'
+
+
+class Contest(db.Model):
+    __tablename__ = 'contests'
+    oj_name = Column(String, primary_key=True)
+    site = Column(String, nullable=False)
+    contest_id = Column(String, nullable=False)
+    title = Column(String, default='')
+    public = Column(Boolean, default=False)
+    status = Column(String, default='Pending')
+    start_time = Column(DateTime, default=datetime.fromtimestamp(0, tz=timezone.utc))
+    end_time = Column(DateTime, default=datetime.fromtimestamp(0, tz=timezone.utc))
+
+    __table_args__ = (UniqueConstraint('site', 'contest_id', name='_site_contest_id_uc'),)
+
+    def to_json(self):
+        contest_json = {
+            'oj_name': self.oj_name,
+            'site': self.site,
+            'contest_id': self.contest_id,
+            'title': self.title,
+            'public': self.public,
+            'status': self.status,
+            'start_time': self.start_time.timestamp(),
+            'end_time': self.end_time.timestamp(),
+        }
+        return contest_json
+
+    def __repr__(self):
+        return (f'<Contest(site={self.site} contest_id={self.contest_id}, title="{self.title}", '
+                f'public={self.public}, status={self.status})>')

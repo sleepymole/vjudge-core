@@ -51,8 +51,9 @@ class BaseClient(ABC):
 
 
 class ContestInfo(object):
-    def __init__(self, contest_id, title='', public=True, status='Pending',
+    def __init__(self, site, contest_id, title='', public=True, status='Pending',
                  start_time=0, end_time=0, problem_list=None):
+        self.site = site
         self.contest_id = contest_id
         self.title = title
         self.public = public
@@ -61,8 +62,21 @@ class ContestInfo(object):
         self.end_time = end_time
         self.problem_list = problem_list or []
 
+    def to_json(self):
+        contest_json = {
+            'site': self.site,
+            'contest_id': self.contest_id,
+            'title': self.title,
+            'public': self.public,
+            'status': self.status,
+            'start_time': self.start_time,
+            'end_time': self.end_time,
+            'problem_list': self.problem_list
+        }
+        return contest_json
+
     def __repr__(self):
-        return (f'<ContestInfo(contest_id={self.contest_id}, title="{self.title}", '
+        return (f'<ContestInfo(site={self.site} contest_id={self.contest_id}, title="{self.title}", '
                 f'public={self.public}, status={self.status})>')
 
 

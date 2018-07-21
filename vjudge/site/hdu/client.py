@@ -299,7 +299,7 @@ class HDUContestClient(_UniClient, ContestClient):
             raise exceptions.JudgeException('You must specific a contest id')
         super().__init__(auth, 'contest', str(contest_id), timeout)
         self.name = f'hdu_ct_{contest_id}'
-        self._contest_info = ContestInfo(self.contest_id)
+        self._contest_info = ContestInfo('hdu', self.contest_id)
         self.refresh_contest_info()
 
     def get_name(self):
@@ -370,7 +370,7 @@ class HDUContestClient(_UniClient, ContestClient):
         try:
             r = session.get(url, timeout=5)
         except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
+            return []
         soup = BeautifulSoup(r.text, 'lxml')
         table = soup.find('table', 'table_text')
         if table is None:
@@ -382,7 +382,7 @@ class HDUContestClient(_UniClient, ContestClient):
             tds = [x.text.strip() for x in tds]
             if len(tds) < 6:
                 continue
-            contest_info = ContestInfo(contest_id=tds[0], title=tds[1], status=tds[4])
+            contest_info = ContestInfo('hdu', contest_id=tds[0], title=tds[1], status=tds[4])
             r = re.search('([0-9]{4})-([0-9]{2})-([0-9]{2}) *?([0-9]{2}):([0-9]{2}):([0-9]{2})', tds[2])
             if r:
                 contest_info.start_time = cls._to_timestamp(r.groups())

@@ -6,7 +6,8 @@ from flask import Flask, jsonify, request, abort, url_for
 from sqlalchemy import and_
 
 from config import REDIS_CONFIG
-from vjudge.models import db, Submission, Problem
+from vjudge.models import db, Submission, Problem, Contest
+from vjudge.site import contest_clients
 
 app = Flask(__name__)
 
@@ -78,6 +79,33 @@ def update_problem(oj_name, problem_id):
     return jsonify({'url': url_for('get_problem', oj_name=oj_name, problem_id=problem_id, _external=True)})
 
 
+@app.route('/contests/<site>', methods=['GET', 'POST'])
+def get_contest_list(site):
+    if site not in contest_clients:
+        abort(404)
+    c = contest_clients[site]
+    contest_list = c.get_recent_contest()
+    return jsonify({
+        'contests': [x.to_json() for x in contest_list]
+    })
+
+
+@app.route('/contests/<site>/<contest_id>')
+def get_contest_info(site, contest_id):
+    contest = Contest.query.filter_by(site=site, contest_id=contest_id).first()
+    if contest is None:
+        abort(404)
+    problems = Problem.query.filter_by(oj_name=contest.oj_name).all()
+    print({
+        'contest': contest.to_json(),
+        'problems': [p.to_json for p in problems]
+    })
+    return jsonify({
+        'contest': contest.to_json(),
+        'problems': [p.to_json() for p in problems]
+    })
+
+
 @app.route('/submissions/<id>', methods=['GET', 'POST'])
 def get_submission(id):
     submission = Submission.query.get(id)
@@ -95,3 +123,8 @@ def shutdown_session(response_or_exc):
 @app.errorhandler(404)
 def page_not_found(e):
     return jsonify({'error': 'not found'}), 404
+
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    return jsonify({'error': 'internal_server_error'}), 500

@@ -1,3 +1,4 @@
+import os
 import logging
 from datetime import datetime
 
@@ -5,6 +6,10 @@ from vjudge.site import exceptions, HDUClient, SOJClient
 from vjudge.models import db, Problem
 
 logging.basicConfig(level=logging.INFO)
+
+
+def init_db():
+    db.create_all()
 
 
 def crawler(oj_name, client, start, end):
@@ -27,7 +32,11 @@ def crawler(oj_name, client, start, end):
             logging.info('problem update: {}'.format(p.summary()))
 
 
-db.create_all()
+def main():
+    init_db()
+    crawler('scu', SOJClient(), 1000, 5000)
+    crawler('hdu', HDUClient(), 1000, 7000)
 
-crawler('scu', SOJClient(), 1000, 5000)
-crawler('hdu', HDUClient(), 1000, 7000)
+
+if __name__ == '__main__':
+    main()
