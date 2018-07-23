@@ -54,7 +54,7 @@ class SOJClient(BaseClient):
         self.password = password
 
     def check_login(self):
-        url = base_url + '/update_user_form.action'
+        url = f'{base_url}/update_user_form.action'
         try:
             r = self._session.get(url, timeout=self.timeout)
         except requests.exceptions.RequestException:
@@ -69,7 +69,7 @@ class SOJClient(BaseClient):
         self.login(self.username, self.password)
 
     def get_problem(self, problem_id):
-        url = base_url + '/problem.action?id={}'.format(problem_id)
+        url = f'{base_url}/problem.action?id={problem_id}'
         try:
             r = self._session.get(url, timeout=self.timeout)
         except requests.exceptions.RequestException:
@@ -83,17 +83,41 @@ class SOJClient(BaseClient):
         return {'title': title}
 
     def get_problem_list(self):
-        return []
+        url = f'{base_url}/problems.action'
+        try:
+            r = self._session.get(url, timeout=self.timeout)
+        except requests.exceptions.RequestException:
+            raise exceptions.ConnectionError
+        volume_list = []
+        try:
+            table = BeautifulSoup(r.text, 'lxml').find('table')
+            tr = table.find('tr')
+            tr = tr.find_next_sibling('tr')
+            tags = tr.find_all('a')
+            for tag in tags:
+                r = re.search(r'\[(.*)\]', tag.text.strip())
+                volume_list.append(r.groups()[0])
+        except (AttributeError, IndexError):
+            pass
+        problem_list = []
+        for vol in volume_list:
+            page_url = f'{url}?volume={vol}'
+            try:
+                r = self._session.get(page_url, timeout=self.timeout)
+            except requests.exceptions.RequestException:
+                raise exceptions.ConnectionError
+            problem_list += self.__class__._parse_problem_id(r.text)
+        problem_list.sort()
+        return problem_list
 
     def submit_problem(self, problem_id, language, source_code):
         if self.auth is None:
             raise exceptions.LoginRequired
-        submit_url = base_url + '/submit.action'
-        status_url = base_url + '/solutions.action?userId={}&problemId={}'. \
-            format(self.username, problem_id)
+        submit_url = f'{base_url}/submit.action'
+        status_url = f'{base_url}/solutions.action?userId={self.username}&problemId={problem_id}'
         captcha = self._get_captcha()
         if captcha is None:
-            raise exceptions.VJudgeException
+            raise exceptions.JudgeException('Can not find a valid captcha')
         data = {
             'problemId': problem_id,
             'validation': captcha,
@@ -120,7 +144,7 @@ class SOJClient(BaseClient):
         return run_id
 
     def get_submit_status(self, run_id, **kwargs):
-        status_url = base_url + '/solutions.action?from=' + run_id
+        status_url = f'{base_url}/solutions.action?from={run_id}'
         try:
             r = self._session.get(status_url, timeout=self.timeout)
         except requests.exceptions.RequestException:
@@ -134,6 +158,23 @@ class SOJClient(BaseClient):
             return verdict, exe_time, exe_mem
         except (IndexError, ValueError):
             pass
+
+    @staticmethod
+    def _parse_problem_id(text):
+        ids = []
+        table = BeautifulSoup(text, 'lxml').find('table')
+        if not table:
+            return ids
+        trs = table.find_all('tr')[3:]
+        for tr in trs:
+            try:
+                tds = tr.find_all('td')
+                pid = tds[1].text.strip()
+                int(pid)
+            except (ValueError, IndexError):
+                continue
+            ids.append(pid)
+        return ids
 
     def _get_captcha(self):
         url = os.path.join(base_url, 'validation_code')
