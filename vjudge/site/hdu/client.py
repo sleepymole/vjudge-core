@@ -112,9 +112,14 @@ class _UniClient(BaseClient):
         except requests.exceptions.RequestException:
             raise exceptions.ConnectionError
         try:
-            table = BeautifulSoup(r.text, 'lxml').find('div', id='fixed_table').table
-            run_id = next(table.find('tr', align="center").stripped_strings)
-        except (AttributeError, StopIteration):
+            tables = BeautifulSoup(r.text, 'lxml').find_all('table')
+            table = None
+            for t in tables:
+                if re.search(r'Run ID.*Judge Status.*Author', str(t), re.DOTALL):
+                    table = t
+            tag = table.find('tr', align="center")
+            run_id = tag.find('td').text.strip()
+        except AttributeError:
             raise exceptions.SubmitError
         return run_id
 
@@ -219,7 +224,7 @@ class _UniClient(BaseClient):
             return
         tags = table.find_all('tr', align="center")
         for tag in tags:
-            result = [x.text for x in tag.find_all('td')]
+            result = [x.text.strip() for x in tag.find_all('td')]
             if len(result) < 6:
                 continue
             if result[0] == run_id:
