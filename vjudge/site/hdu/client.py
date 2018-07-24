@@ -1,7 +1,7 @@
 import re
 from abc import abstractmethod
 from urllib.parse import urljoin
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -420,4 +420,5 @@ class HDUContestClient(_UniClient, ContestClient):
             d = [int(x) for x in d]
         except ValueError:
             return 0
-        return datetime(*d, tzinfo=timezone(offset=timedelta(hours=8))).timestamp()
+        utc = datetime(*d) - timedelta(hours=8)
+        return utc.timestamp()

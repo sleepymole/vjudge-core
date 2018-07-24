@@ -115,7 +115,7 @@ class ProblemCrawler(threading.Thread):
 class SubmitQueueHandler(threading.Thread):
     def __init__(self, queues, pool=None, daemon=None):
         super().__init__(daemon=daemon)
-        self.redis_key = REDIS_CONFIG['queue']['submit_queue']
+        self.redis_key = REDIS_CONFIG['queue']['submitter_queue']
         self.redis_con = redis.StrictRedis(connection_pool=pool)
         self.queues = queues
 
@@ -137,7 +137,7 @@ class SubmitQueueHandler(threading.Thread):
 class ProblemQueueHandler(threading.Thread):
     def __init__(self, queues, pool=None, daemon=None):
         super().__init__(daemon=daemon)
-        self.redis_key = REDIS_CONFIG['queue']['problem_queue']
+        self.redis_key = REDIS_CONFIG['queue']['crawler_queue']
         self.redis_con = redis.StrictRedis(connection_pool=pool)
         self.queues = queues
 

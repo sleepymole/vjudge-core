@@ -3,38 +3,44 @@ from datetime import datetime, timedelta
 
 import redis
 from flask import Flask, jsonify, request, abort, url_for
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 
 from config import REDIS_CONFIG
 from vjudge.models import db, Submission, Problem, Contest
-from vjudge.site import contest_clients
+from vjudge.site import contest_clients, supported_sites, supported_contest_sites
 
 app = Flask(__name__)
 
-redis_con = redis.StrictRedis(host=REDIS_CONFIG['host'], port=REDIS_CONFIG['port'])
-submit_queue = REDIS_CONFIG['queue']['submit_queue']
-problem_queue = REDIS_CONFIG['queue']['problem_queue']
+redis_con = redis.StrictRedis(host=REDIS_CONFIG['host'], port=REDIS_CONFIG['port'], db=REDIS_CONFIG['db'])
+submitter_queue = REDIS_CONFIG['queue']['submitter_queue']
+crawler_queue = REDIS_CONFIG['queue']['crawler_queue']
 
 
 @app.route('/problems/')
-def get_problems():
+def get_problem_list():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
     oj_name = request.args.get('oj_name', '')
     problem_id = request.args.get('problem_id', '')
+    if oj_name:
+        oj_name_filter = Problem.oj_name == oj_name
+    else:
+        filter_args = []
+        for site in supported_sites:
+            filter_args.append(Problem.oj_name == site)
+        oj_name_filter = or_(*filter_args)
     pagination = Problem.query.filter(
-        and_(Problem.oj_name.like(oj_name or '%'),
-             Problem.problem_id.like(problem_id or '%'))). \
-        paginate(page=page, per_page=per_page, error_out=False)
+        and_(oj_name_filter, Problem.problem_id.like(problem_id or '%'))).paginate(
+        page=page, per_page=per_page, error_out=False)
     problems = pagination.items
     page = pagination.page
     prev = None
     if pagination.has_prev:
-        prev = url_for('get_problems', oj_name=oj_name, problem_id=problem_id,
+        prev = url_for('get_problem_list', oj_name=oj_name, problem_id=problem_id,
                        page=page - 1, per_page=per_page, _external=True)
     next = None
     if pagination.has_next:
-        next = url_for('get_problems', oj_name=oj_name, problem_id=problem_id,
+        next = url_for('get_problem_list', oj_name=oj_name, problem_id=problem_id,
                        page=page + 1, per_page=per_page, _external=True)
     return jsonify({
         'problems': [p.summary() for p in problems],
@@ -45,22 +51,18 @@ def get_problems():
 
 
 @app.route('/problems/', methods=['POST'])
-def submit_problem():
+def refresh_all_problems():
     oj_name = request.form.get('oj_name')
-    problem_id = request.form.get('problem_id')
-    language = request.form.get('language')
-    source_code = request.form.get('source_code')
-    if None in (oj_name, problem_id, language, source_code):
-        return jsonify({'error': 'parameter error'})
-    if not Problem.query.filter_by(oj_name=oj_name, problem_id=problem_id).first():
-        return jsonify({'error': 'no such problem'})
-    submission = Submission(oj_name=oj_name, problem_id=problem_id,
-                            language=language, source_code=source_code)
-    db.session.add(submission)
-    db.session.commit()
-    redis_con.lpush(submit_queue, submission.id)
-    url = url_for('get_submission', id=submission.id, _external=True)
-    return jsonify({'id': submission.id, 'url': url})
+    if oj_name is None:
+        return jsonify({'error': 'missing field oj_name'}), 422
+    if oj_name not in supported_sites:
+        return jsonify({'error': f'oj {oj_name} is not supported'}), 422
+    redis_con.lpush(crawler_queue, json.dumps({
+        'oj_name': oj_name,
+        'type': 'problem',
+        'all': True
+    }))
+    return jsonify({'status': 'success'})
 
 
 @app.route('/problems/<oj_name>/<problem_id>')
@@ -69,18 +71,84 @@ def get_problem(oj_name, problem_id):
     if problem is None:
         abort(404)
     if datetime.utcnow() - timedelta(days=1) > problem.last_update:
-        redis_con.lpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
+        redis_con.lpush(crawler_queue, json.dumps({
+            'oj_name': oj_name,
+            'type': 'problem',
+            'all': False,
+            'problem_id': problem_id
+        }))
     return jsonify(problem.to_json())
 
 
 @app.route('/problems/<oj_name>/<problem_id>', methods=['POST'])
-def update_problem(oj_name, problem_id):
-    redis_con.lpush(problem_queue, json.dumps({'oj_name': oj_name, 'problem_id': problem_id}))
-    return jsonify({'url': url_for('get_problem', oj_name=oj_name, problem_id=problem_id, _external=True)})
+def refresh_problem(oj_name, problem_id):
+    problem = Problem.query.filter_by(oj_name=oj_name, problem_id=problem_id).first()
+    if problem is None:
+        return jsonify({'error': 'problem not found'}), 422
+    redis_con.lpush(crawler_queue, json.dumps({
+        'oj_name': oj_name,
+        'type': 'problem',
+        'all': False,
+        'problem_id': problem_id
+    }))
+    return jsonify({
+        'status': 'success',
+        'url': url_for('get_problem', oj_name=oj_name, problem_id=problem_id, _external=True)
+    })
 
 
-@app.route('/contests/<site>', methods=['GET', 'POST'])
-def get_contest_list(site):
+@app.route('/submissions/')
+def get_submission_list():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+
+    pagination = Submission.query.paginate(
+        page=page, per_page=per_page, error_out=False)
+    submissions = pagination.items
+    page = pagination.page
+    prev = None
+    if pagination.has_prev:
+        prev = url_for('get_submission_list', page=page - 1, per_page=per_page, _external=True)
+    next = None
+    if pagination.has_next:
+        next = url_for('get_submission_list', page=page + 1, per_page=per_page, _external=True)
+    return jsonify({
+        'submissions': [s.to_json() for s in submissions],
+        'prev': prev,
+        'next': next,
+        'count': pagination.total
+    })
+
+
+@app.route('/submissions/', methods=['POST'])
+def submit_problem():
+    oj_name = request.form.get('oj_name')
+    problem_id = request.form.get('problem_id')
+    language = request.form.get('language')
+    source_code = request.form.get('source_code')
+    if None in (oj_name, problem_id, language, source_code):
+        return jsonify({'error': 'missing field'}), 422
+    if not Problem.query.filter_by(oj_name=oj_name, problem_id=problem_id).first():
+        return jsonify({'error': 'no such problem'}), 422
+    submission = Submission(oj_name=oj_name, problem_id=problem_id,
+                            language=language, source_code=source_code)
+    db.session.add(submission)
+    db.session.commit()
+    redis_con.lpush(submitter_queue, submission.id)
+    url = url_for('get_submission', id=submission.id, _external=True)
+    return jsonify({'status': 'success', 'id': submission.id, 'url': url})
+
+
+@app.route('/submissions/<id>')
+def get_submission(id):
+    submission = Submission.query.get(id)
+    if submission is None:
+        abort(404)
+    return jsonify(submission.to_json())
+
+
+@app.route('/contests/<site>')
+def get_recent_contests(site):
     if site not in contest_clients:
         abort(404)
     c = contest_clients[site]
@@ -96,22 +164,23 @@ def get_contest_info(site, contest_id):
     if contest is None:
         abort(404)
     problems = Problem.query.filter_by(oj_name=contest.oj_name).all()
-    print({
-        'contest': contest.to_json(),
-        'problems': [p.to_json for p in problems]
-    })
     return jsonify({
         'contest': contest.to_json(),
         'problems': [p.to_json() for p in problems]
     })
 
 
-@app.route('/submissions/<id>', methods=['GET', 'POST'])
-def get_submission(id):
-    submission = Submission.query.get(id)
-    if submission is None:
-        abort(404)
-    return jsonify(submission.to_json())
+@app.route('/contests/<site>/<contest_id>', methods=['POST'])
+def crawl_contest_info(site, contest_id):
+    if site not in supported_contest_sites:
+        return jsonify({'error': f'site {site} is not supported'}), 422
+    redis_con.lpush(crawler_queue, json.dumps({
+        'oj_name': site,
+        'type': 'contest',
+        'contest_id': contest_id
+    }))
+    url = url_for('get_contest_info', site=site, contest_id=contest_id, _external=True)
+    return jsonify({'status': 'success', 'url': url})
 
 
 @app.teardown_appcontext

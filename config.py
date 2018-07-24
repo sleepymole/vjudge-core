@@ -9,9 +9,10 @@ OJ_CONFIG = os.path.dirname(__file__) + '/accounts.json'
 REDIS_CONFIG = {
     'host': 'localhost',
     'port': 6379,
+    'db': 0,
     'queue': {
-        'submit_queue': 'vjudge-core-task-submitter',
-        'problem_queue': 'vjudge-core-task-problem-crawler'
+        'submitter_queue': 'vjudge-core-task-submitter',
+        'crawler_queue': 'vjudge-core-task-crawler'
     }
 }
 
