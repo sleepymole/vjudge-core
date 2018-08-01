@@ -1,5 +1,11 @@
 import os
+import json
 import random
+import logging
+
+log_format = '[%(asctime)s] [%(process)d] [%(levelname)s] %(message)s'
+logging.basicConfig(level=logging.INFO, format=log_format, datefmt='%Y-%m-%d %H:%M:%S %z')
+logger = logging.getLogger('vjudge-core')
 
 SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
                           'sqlite:///' + os.path.dirname(__file__) + '/data.sqlite'
@@ -62,3 +68,27 @@ def get_header():
         'Connection': 'keep-alive',
         'Accept-Encoding': 'gzip, deflate'
     }
+
+
+def get_accounts():
+    with open(OJ_CONFIG) as f:
+        result = json.load(f)
+    normal_accounts = {}
+    for account in result['normal_accounts']:
+        site = account['site']
+        authentications = []
+        for auth in account['auth']:
+            authentications.append((auth['username'], auth['password']))
+        normal_accounts[site] = authentications
+    contest_accounts = {}
+    for account in result['contest_accounts']:
+        site = account['site']
+        for auth in account['auth']:
+            supported_contests = auth['supported_contests']
+            for contest_id in supported_contests:
+                oj_name = f'{site}_ct_{contest_id}'
+                if oj_name not in contest_accounts:
+                    contest_accounts[oj_name] = []
+                authentications = contest_accounts.get(oj_name)
+                authentications.append((auth['username'], auth['password']))
+    return normal_accounts, contest_accounts

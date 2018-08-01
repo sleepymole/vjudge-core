@@ -26,13 +26,5 @@ class LoginRequired(JudgeException):
     pass
 
 
-class ProblemNotFound(JudgeException):
-    pass
-
-
-class LanguageError(JudgeException):
-    pass
-
-
 class SubmitError(JudgeException):
     pass

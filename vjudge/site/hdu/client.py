@@ -20,8 +20,6 @@ LANG_ID = {'G++': '0', 'GCC': '1', 'C++': '2',
 PAGE_TITLES = {'Problem Description': 'description', 'Input': 'input', 'Output': 'output',
                'Sample Input': 'sample_input', 'Sample Output': 'sample_output'}
 
-MAX_VOL = 100
-
 
 class _UniClient(BaseClient):
     def __init__(self, auth=None, client_type='practice', contest_id='0', timeout=5):
@@ -40,7 +38,7 @@ class _UniClient(BaseClient):
 
     def get_user_id(self):
         if self.auth is None:
-            raise exceptions.LoginRequired
+            raise exceptions.LoginRequired('Login is required')
         return self.username
 
     def login(self, username, password):
@@ -51,11 +49,9 @@ class _UniClient(BaseClient):
             'userpass': password
         }
         try:
-            r = self._session.post(url, data, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
-        if re.search('Sign In Your Account', r.text):
-            raise exceptions.LoginError
+            self._request_url('post', url, data=data)
+        except exceptions.LoginExpired:
+            raise exceptions.LoginError('User not exist or wrong password')
         self.auth = (username, password)
         self.username = username
         self.password = password
@@ -66,16 +62,13 @@ class _UniClient(BaseClient):
 
     def update_cookies(self):
         if self.auth is None:
-            raise exceptions.LoginRequired
+            raise exceptions.LoginRequired('Login is required')
         self.login(self.username, self.password)
 
     def get_problem(self, problem_id):
         url = self._get_problem_url(problem_id)
-        try:
-            r = self._session.get(url, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
-        return self._parse_problem(r.text)
+        resp = self._request_url('get', url)
+        return self._parse_problem(resp)
 
     @abstractmethod
     def get_problem_list(self):
@@ -83,7 +76,7 @@ class _UniClient(BaseClient):
 
     def submit_problem(self, problem_id, language, source_code):
         if self.auth is None:
-            raise exceptions.LoginRequired
+            raise exceptions.LoginRequired('Login is required')
         if language not in LANG_ID:
             raise exceptions.SubmitError(f'Language "{language}" is not supported')
         if self.client_type == 'contest':
@@ -98,58 +91,50 @@ class _UniClient(BaseClient):
         else:
             data['check'] = '0'
         url = self._get_submit_url()
+        resp = self._request_url('post', url, data=data)
+        if re.search('Code length is improper', resp):
+            raise exceptions.SubmitError('Code length is too short')
+        if not re.search('Realtime Status', resp):
+            raise exceptions.SubmitError('Submit failed unexpectedly')
+        url = self._get_status_url(problem_id=problem_id, user_id=self.username)
+        resp = self._request_url('get', url)
         try:
-            r = self._session.post(url, data, timeout=self.timeout)
-            r.encoding = 'GBK'
-            if re.search('Sign In Your Account', r.text):
-                raise exceptions.LoginExpired
-            if re.search('Code length is improper', r.text):
-                raise exceptions.SubmitError('Code length is too short')
-            if not re.search('Realtime Status', r.text):
-                raise exceptions.SubmitError
-            status_url = self._get_status_url(problem_id=problem_id, user_id=self.username)
-            r = self._session.get(status_url, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
-        try:
-            tables = BeautifulSoup(r.text, 'lxml').find_all('table')
-            table = None
-            for t in tables:
-                if re.search(r'Run ID.*Judge Status.*Author', str(t), re.DOTALL):
-                    table = t
+            tables = BeautifulSoup(resp, 'lxml').find_all('table')
+            tables.reverse()
+            pattern = re.compile(r'Run ID.*Judge Status.*Author', re.DOTALL)
+            table = next(filter(lambda x: re.search(pattern, str(x)), tables))
             tag = table.find('tr', align="center")
             run_id = tag.find('td').text.strip()
-        except AttributeError:
-            raise exceptions.SubmitError
+        except (AttributeError, StopIteration):
+            raise exceptions.SubmitError('Submit failed unexpectedly')
         return run_id
 
     def get_submit_status(self, run_id, **kwargs):
-        if self.auth is None and self.client_type == 'contest':
-            raise exceptions.LoginRequired
         user_id = kwargs.get('user_id', '')
         problem_id = kwargs.get('problem_id', '')
         url = self._get_status_url(run_id=run_id, problem_id=problem_id, user_id=user_id)
-        try:
-            r = self._session.get(url, timeout=self.timeout)
-            r.encoding = 'GBK'
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
-        if re.search('Sign In Your Account', r.text):
-            raise exceptions.LoginExpired
-        result = self.__class__._find_verdict(r.text, run_id)
+        resp = self._request_url('get', url)
+        result = self.__class__._find_verdict(resp, run_id)
         if result is not None:
             return result
         if self.client_type == 'contest':
             for page in range(2, 5):
                 status_url = url + f'&page={page}'
-                try:
-                    r = self._session.get(status_url, timeout=self.timeout)
-                    r.encoding = 'GBK'
-                except requests.exceptions.RequestException:
-                    raise exceptions.ConnectionError
-                result = self.__class__._find_verdict(r.text, run_id)
+                resp = self._request_url('get', status_url)
+                result = self.__class__._find_verdict(resp, run_id)
                 if result is not None:
                     return result
+
+    def _request_url(self, method, url, data=None, timeout=None):
+        if timeout is None:
+            timeout = self.timeout
+        try:
+            r = self._session.request(method, url, data=data, timeout=timeout)
+        except requests.exceptions.RequestException:
+            raise exceptions.ConnectionError(f'Cannot connect to "{url}"')
+        if re.search('Sign In Your Account', r.text):
+            raise exceptions.LoginExpired('Login is expired')
+        return r.text
 
     def _get_login_url(self):
         login_url = f'{BASE_URL}/userloginex.php?action=login'
@@ -216,11 +201,11 @@ class _UniClient(BaseClient):
     def _find_verdict(text, run_id):
         soup = BeautifulSoup(text, 'lxml')
         tables = soup.find_all('table')
-        table = None
-        for t in tables:
-            if re.search(r'Run ID.*Judge Status.*Author', str(t), re.DOTALL):
-                table = t
-        if table is None:
+        tables.reverse()
+        try:
+            pattern = re.compile(r'Run ID.*Judge Status.*Author', re.DOTALL)
+            table = next(filter(lambda x: re.search(pattern, str(x)), tables))
+        except StopIteration:
             return
         tags = table.find_all('tr', align="center")
         for tag in tags:
@@ -256,45 +241,35 @@ class HDUClient(_UniClient):
     def check_login(self):
         url = BASE_URL + '/control_panel.php'
         try:
-            r = self._session.get(url, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
-        if re.search('Sign In Your Account', r.text):
+            self._request_url('get', url)
+        except exceptions.LoginExpired:
             return False
         return True
 
     def get_problem_list(self):
         url = f'{BASE_URL}/listproblem.php'
-        try:
-            r = self._session.get(url, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
+        resp = self._request_url('get', url)
+        vols = set(re.findall(r'listproblem.php\?vol=([0-9]+)', resp))
+        vols = [int(x) for x in vols]
+        vols.sort()
         result = []
-        ids = self.__class__._parse_problem_id(r.text)
-        result += ids
-        vol = 2
-        while ids and vol < MAX_VOL:
+        for vol in vols:
             ex_url = url + f'?vol={vol}'
             vol += 1
             try:
-                r = self._session.get(ex_url, timeout=self.timeout)
-            except requests.exceptions.RequestException:
+                resp = self._request_url('get', ex_url)
+            except exceptions.ConnectionError:
                 break
-            ids = self.__class__._parse_problem_id(r.text)
-            if not ids:
-                break
+            ids = self.__class__._parse_problem_id(resp)
             result += ids
         result.sort()
         return result
 
     @staticmethod
     def _parse_problem_id(text):
-        ids = []
         pattern = re.compile(r'p\([^,()]+?,([^,()]+?)(,[^,()]+?){4}\);', re.DOTALL)
         res = re.findall(pattern, text)
-        if res:
-            ids = [x[0] for x in res]
-        return ids
+        return [x[0] for x in res]
 
 
 class HDUContestClient(_UniClient, ContestClient):
@@ -314,13 +289,18 @@ class HDUContestClient(_UniClient, ContestClient):
         return self.contest_id
 
     def check_login(self):
-        return True
+        raise NotImplementedError
 
     def get_contest_info(self):
         return self._contest_info
 
     def get_problem_list(self):
         return self._contest_info.problem_list
+
+    def get_problem(self, problem_id):
+        if not self._contest_info.public and self.auth is None:
+            raise exceptions.LoginRequired('Login is required')
+        return super().get_problem(problem_id)
 
     def submit_problem(self, problem_id, language, source_code):
         self.refresh_contest_info()
@@ -330,41 +310,43 @@ class HDUContestClient(_UniClient, ContestClient):
             raise exceptions.SubmitError('Contest is ended')
         return super().submit_problem(problem_id, language, source_code)
 
+    def get_submit_status(self, run_id, **kwargs):
+        if not self._contest_info.public and self.auth is None:
+            raise exceptions.LoginRequired('Login is required')
+        return super().get_submit_status(run_id, **kwargs)
+
     def refresh_contest_info(self):
         url = f'{BASE_URL}/contests/contest_show.php?cid={self.contest_id}'
         try:
-            r = self._session.get(url, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
-        if re.search(r'System Message', r.text):
+            resp = self._request_url('get', url)
+        except exceptions.LoginExpired:
+            raise exceptions.LoginRequired('Login is required')
+        if re.search(r'System Message', resp):
             raise exceptions.ConnectionError(f'Contest {self.contest_id} not exists')
-        self._contest_info.problem_list = self.__class__._parse_problem_id(r.text)
-        soup = BeautifulSoup(r.text, 'lxml')
+        self._contest_info.problem_list = self.__class__._parse_problem_id(resp)
+        soup = BeautifulSoup(resp, 'lxml')
         h1 = self._contest_info.title = soup.h1
         if h1:
             self._contest_info.title = h1.get_text()
         divs = soup.find_all('div')
-        pattern = re.compile(r'Start.*Time.*Contest.*Type.*Contest.*Status', re.DOTALL)
-        div = None
-        for d in divs:
-            if re.search(pattern, str(d)):
-                div = d
-        if not div:
+        divs.reverse()
+        try:
+            pattern = re.compile(r'Start.*Time.*Contest.*Type.*Contest.*Status', re.DOTALL)
+            div = next(filter(lambda x: re.search(pattern, str(x)), divs))
+        except StopIteration:
             return
-        r = re.search(r'Start *?Time *?: *?([0-9]{4})-([0-9]{2})-([0-9]{2}) *?([0-9]{2}):([0-9]{2}):([0-9]{2})',
-                      div.get_text())
-        if r:
-            self._contest_info.start_time = self._to_timestamp(r.groups())
-        r = re.search(r'End *?Time *?: *?([0-9]{4})-([0-9]{2})-([0-9]{2}) *?([0-9]{2}):([0-9]{2}):([0-9]{2})',
-                      div.get_text())
-        if r:
-            self._contest_info.end_time = self._to_timestamp(r.groups())
-        r = re.search(r'Contest *?Type *?:(.*?)Contest *?Status', div.get_text())
-        if r and 'Public' not in r.groups()[0].strip():
-            self._contest_info.public = False
-        r = re.search(r'Contest *?Status.*?:(.*?)Current.*?Server.*?Time', div.get_text())
-        if r:
-            self._contest_info.status = r.groups()[0].strip()
+        pattern = re.compile(
+            r'Start *?Time *?: *?([0-9]{4})-([0-9]{2})-([0-9]{2}) *?([0-9]{2}):([0-9]{2}):([0-9]{2}).*?'
+            r'End *?Time *?: *?([0-9]{4})-([0-9]{2})-([0-9]{2}) *?([0-9]{2}):([0-9]{2}):([0-9]{2}).*?'
+            r'Contest *?Type *?:(.*?)Contest *?Status.*?:(.*?)Current.*?Server.*?Time',
+            re.DOTALL)
+        res = re.search(pattern, div.get_text())
+        if res:
+            res = [x.strip() for x in res.groups()]
+            self._contest_info.start_time = self._to_timestamp(res[0:6])
+            self._contest_info.end_time = self._to_timestamp(res[6:12])
+            self._contest_info.public = res[12] == 'Public'
+            self._contest_info.status = res[13]
 
     @classmethod
     def get_recent_contest(cls):
@@ -401,11 +383,10 @@ class HDUContestClient(_UniClient, ContestClient):
         res = []
         soup = BeautifulSoup(text, 'lxml')
         tables = soup.find_all('table')
-        table = None
-        for t in tables:
-            if re.search(r'Solved.*Title.*Ratio', str(t), re.DOTALL):
-                table = t
-        if table is None:
+        try:
+            pattern = re.compile(r'Solved.*Title.*Ratio', re.DOTALL)
+            table = next(filter(lambda x: re.search(pattern, str(x)), tables))
+        except StopIteration:
             return res
         tags = table.find_all('tr', align="center")
         for tag in tags:

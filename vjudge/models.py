@@ -30,8 +30,8 @@ class Submission(db.Model):
         return submission_json
 
     def __repr__(self):
-        return '<Submission(id={}, user_id={}, oj_name={}, problem_id={} verdict={})>'. \
-            format(self.run_id, self.user_id, self.oj_name, self.problem_id, self.verdict)
+        return (f'<Submission(id={self.id}, user_id={self.user_id}, oj_name={self.oj_name}, '
+                f'problem_id={self.problem_id} verdict="{self.verdict}")>')
 
 
 class Problem(db.Model):

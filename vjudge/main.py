@@ -1,231 +1,269 @@
-import json
-import logging
+import asyncio
 import threading
-import time
-from datetime import datetime, timedelta
-from queue import Queue
-
+import re
 import redis
-from sqlalchemy import func
-
-from config import REDIS_CONFIG, OJ_CONFIG
-from .site import get_normal_client, exceptions
-from .models import db, Submission, Problem
-
-logging.basicConfig(level=logging.INFO)
-
-
-class Submitter(threading.Thread):
-    def __init__(self, client, submit_queue, status_queue, daemon=False):
-        super().__init__(daemon=daemon)
-        self.client = client
-        self.oj_name = client.get_name()
-        self.user_id = client.get_user_id()
-        self.submit_queue = submit_queue
-        self.status_queue = status_queue
-
-    def run(self):
-        while True:
-            submission = Submission.query.get(self.submit_queue.get())
-            try:
-                run_id = self.client.submit_problem(submission.problem_id, submission.language,
-                                                    submission.source_code)
-            except (exceptions.SubmitError, exceptions.ConnectionError):
-                submission.verdict = 'Submit Failed'
-                db.session.commit()
-                logging.info('problem submit: {}'.format(submission.to_json()))
-            except exceptions.LoginExpired:
-                try:
-                    self.client.update_cookies()
-                    self.submit_queue.put(submission.id)
-                except exceptions.ConnectionError:
-                    submission.verdict = 'Submit Failed'
-                    db.session.commit()
-                    logging.info('problem submit: {}'.format(submission.to_json()))
-            else:
-                submission.run_id = run_id
-                submission.user_id = self.user_id
-                submission.verdict = 'Being Judged'
-                db.session.commit()
-                logging.info('problem submit: {}'.format(submission.to_json()))
-                self.status_queue.put(submission.id)
+from queue import Queue, Empty
+from datetime import datetime, timedelta
+from config import REDIS_CONFIG, logger
+from .site import get_normal_client, get_contest_client, exceptions
+from .models import db, Submission, Problem, Contest
 
 
 class StatusCrawler(threading.Thread):
-    def __init__(self, client, status_queue, daemon=None):
+    def __init__(self, client, daemon=None):
         super().__init__(daemon=daemon)
-        self.client = client
-        self.oj_name = client.get_name()
-        self.status_queue = status_queue
+        self._client = client
+        self._user_id = client.get_user_id()
+        self._name = client.get_name()
+        self._start_event = threading.Event()
+        self._stop_event = threading.Event()
+        self._tasks = []
+        self._thread = None
+        self._loop = None
 
     def run(self):
-        while True:
-            submission = Submission.query.get(self.status_queue.get())
-            if datetime.utcnow() - submission.time_stamp > timedelta(hours=1):
-                submission.verdict = 'Judge Failed'
-                db.session.commit()
-                continue
+        self._thread = threading.current_thread()
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._loop.call_soon(self._start_event.set)
+        self._loop.run_forever()
+        pending_tasks = asyncio.all_tasks(self._loop)
+        self._loop.run_until_complete(asyncio.gather(*pending_tasks))
+
+    def wait_start(self, timeout=None):
+        return self._start_event.wait(timeout)
+
+    def add_task(self, submission_id):
+        if not self._start_event.is_set():
+            raise RuntimeError('Cannot add task before crawler is started')
+        if self._stop_event.is_set():
+            raise RuntimeError('Cannot add task when crawler is stopping')
+        self._loop.call_soon_threadsafe(
+            asyncio.ensure_future, self._crawl_status(submission_id))
+        return True
+
+    def stop(self):
+        if not self._start_event.is_set():
+            raise RuntimeError('Cannot stop crawler before it is started')
+        if self._stop_event.is_set():
+            raise RuntimeError('Crawler can only be stopped once')
+        self._stop_event.set()
+        self._loop.call_soon_threadsafe(self._loop.stop)
+
+    async def _crawl_status(self, submission_id):
+        submission = Submission.query.get(submission_id)
+        if (not submission.run_id or submission.oj_name != self._name
+                or submission.verdict != 'Being Judged'):
+            return
+        for delay in range(120):
+            await asyncio.sleep(delay)
             try:
-                verdict, exe_time, exe_mem = self.client.get_submit_status(
+                verdict, exe_time, exe_mem = self._client.get_submit_status(
                     submission.run_id,
                     user_id=submission.user_id,
                     problem_id=submission.problem_id)
-            except exceptions.ConnectionError:
+            except exceptions.ConnectionError as e:
                 submission.verdict = 'Judge Failed'
                 db.session.commit()
+                logger.error(f'Crawled status for {submission} failed. Reason: {e}')
+                return
+            except exceptions.LoginExpired:
+                self._client.update_cookies()
+                logger.debug(f'{self}: Login is expired, login again')
                 continue
-            if verdict in ('Being Judged', 'Queuing', 'Compiling', 'Running'):
-                self.status_queue.put(submission.id)
-            else:
+            if verdict not in ('Being Judged', 'Queuing', 'Compiling', 'Running'):
                 submission.verdict = verdict
                 submission.exe_time = exe_time
                 submission.exe_mem = exe_mem
                 db.session.commit()
+                logger.info(f'Crawled status for {submission} successfully')
+                return
+        submission.verdict = 'Judge Failed'
+        db.session.commit()
+        logger.error(f'Crawled status for {submission} failed. Reason: Timeout')
+
+    def __repr__(self):
+        return f'<StatusCrawler(oj_name={self._name}, user_id={self._user_id})>'
 
 
-class ProblemCrawler(threading.Thread):
-    def __init__(self, client, problem_queue, daemon=None):
+class Submitter(threading.Thread):
+    def __init__(self, client, submit_queue, status_crawler, daemon=None):
         super().__init__(daemon=daemon)
-        self.client = client
-        self.oj_name = client.get_name()
-        self.problem_queue = problem_queue
+        self._client = client
+        self._user_id = client.get_user_id()
+        self._name = client.get_name()
+        self._submit_queue = submit_queue
+        self._status_crawler = status_crawler
+        self._stop_event = threading.Event()
 
     def run(self):
-        while True:
-            problem_id = self.problem_queue.get()
-            try:
-                result = self.client.get_problem(problem_id)
-            except exceptions.ConnectionError:
-                continue
-            if not result:
-                continue
-            problem = Problem.query.filter_by(
-                oj_name=self.oj_name, problem_id=problem_id).first() or Problem()
-            for attr in result:
-                if hasattr(problem, attr):
-                    setattr(problem, attr, result[attr])
-            problem.oj_name = self.oj_name
-            problem.problem_id = problem_id
-            problem.last_update = datetime.utcnow()
-            db.session.add(problem)
-            db.session.commit()
-            logging.info('problem update: {}'.format(problem.summary()))
-
-
-class SubmitQueueHandler(threading.Thread):
-    def __init__(self, queues, pool=None, daemon=None):
-        super().__init__(daemon=daemon)
-        self.redis_key = REDIS_CONFIG['queue']['submitter_queue']
-        self.redis_con = redis.StrictRedis(connection_pool=pool)
-        self.queues = queues
-
-    def run(self):
+        self._status_crawler.start()
+        self._status_crawler.wait_start()
+        logger.info(f'{self} started successfully')
         while True:
             try:
-                submission = Submission.query.get(int(self.redis_con.brpop(self.redis_key)[1]))
-            except (ValueError, TypeError):
+                submission = Submission.query.get(self._submit_queue.get(timeout=60))
+            except Empty:
+                if self._stop_event.is_set():
+                    break
                 continue
-            if submission:
-                submit_queue = self.queues.get(submission.oj_name)
-                if submit_queue:
-                    submit_queue.put(submission.id)
-                else:
+            try:
+                run_id = self._client.submit_problem(
+                    submission.problem_id, submission.language, submission.source_code)
+            except (exceptions.SubmitError, exceptions.ConnectionError) as e:
+                submission.verdict = 'Submit Failed'
+                db.session.commit()
+                logger.error(f'{submission} is submitted failed. Reason: {e}')
+            except exceptions.LoginExpired:
+                try:
+                    self._client.update_cookies()
+                    self._submit_queue.put(submission.id)
+                    logger.debug(f'{self}: Login is expired, login again')
+                except exceptions.ConnectionError as e:
                     submission.verdict = 'Submit Failed'
                     db.session.commit()
+                    logger.error(f'{submission} is submitted failed. Reason: {e}')
+            else:
+                submission.run_id = run_id
+                submission.user_id = self._user_id
+                submission.verdict = 'Being Judged'
+                db.session.commit()
+                logger.info(f'{submission} is submitted successfully')
+                self._status_crawler.add_task(submission.id)
+        self._status_crawler.stop()
+        self._status_crawler.join()
+
+    def stop(self):
+        self._stop_event.set()
+
+    def __repr__(self):
+        return f'<Submitter(oj_name={self._name}, user_id={self._user_id})>'
 
 
-class ProblemQueueHandler(threading.Thread):
-    def __init__(self, queues, pool=None, daemon=None):
+class PageCrawler(threading.Thread):
+    def __init__(self, client, page_queue, daemon=None):
         super().__init__(daemon=daemon)
-        self.redis_key = REDIS_CONFIG['queue']['crawler_queue']
-        self.redis_con = redis.StrictRedis(connection_pool=pool)
-        self.queues = queues
+        self._client = client
+        self._user_id = client.get_user_id()
+        self._page_queue = page_queue
 
     def run(self):
-        while True:
-            result = self.redis_con.brpop(self.redis_key, timeout=3600)
-            if result:
-                try:
-                    data = json.loads(result[1].decode())
-                    oj_name = data.get('oj_name')
-                    problem_id = data.get('problem_id')
-                except json.decoder.JSONDecodeError:
-                    continue
-                que = self.queues.get(oj_name)
-                if que:
-                    que.put(problem_id)
-            else:
-                self.refresh_problem()
+        pass
 
-    def refresh_problem(self):
-        outdated_problems = Problem.query.filter(
-            datetime.utcnow() - timedelta(days=1) > Problem.last_update).all()
-        for p in outdated_problems:
-            que = self.queues.get(p.oj_name)
-            if que:
-                que.put(p.problem_id)
-        result = db.session.query(
-            Problem.oj_name.label('oj_name'),
-            func.max(Problem.problem_id).label('max_id')).group_by(
-            Problem.oj_name).all()
-        for oj_name, max_id in result:
-            que = self.queues.get(oj_name)
-            if que:
-                for i in range(1, 21):
-                    problem_id = str(int(max_id) + i)
-                    que.put(problem_id)
+
+class SubmitterHandler(threading.Thread):
+    def __init__(self, normal_accounts, contest_accounts, daemon=None):
+        super().__init__(daemon=daemon)
+        self._redis_key = REDIS_CONFIG['queue']['submitter_queue']
+        self._redis_con = redis.StrictRedis(
+            host=REDIS_CONFIG['host'], port=REDIS_CONFIG['port'], db=REDIS_CONFIG['db'])
+        self._normal_accounts = normal_accounts
+        self._contest_accounts = contest_accounts
+        self._running_submitters = {}
+        self._stopping_submitters = {}
+        self._queues = {}
+
+    def run(self):
+        last_clean = datetime.utcnow()
+        while True:
+            data = self._redis_con.brpop(self._redis_key, timeout=600)
+            if datetime.utcnow() - last_clean > timedelta(minutes=10):
+                self._clean_free_clients()
+            if not data:
+                continue
+            try:
+                submission_id = int(data[1])
+            except (ValueError, TypeError):
+                logger.error(f'Receive corrupt data "{data[1]}"')
+                continue
+            submission = Submission.query.get(submission_id)
+            if not submission:
+                logger.error(f'Submission {submission_id} is not found')
+                continue
+            if submission.oj_name not in self._queues:
+                self._queues[submission.oj_name] = Queue()
+            submit_queue = self._queues.get(submission.oj_name)
+            if submission.oj_name not in self._running_submitters:
+                if not self._start_new_clients(submission.oj_name, submit_queue):
+                    submission.verdict = 'Submit Failed'
+                    db.session.commit()
+                    logger.error(f'Cannot start client for {submission.oj_name}')
+                    continue
+            assert submission.oj_name in self._running_submitters
+            submit_queue.put(submission.id)
+
+    def _start_new_clients(self, oj_name, submit_queue):
+        submitter_info = {'submitters': {}}
+        submitters = submitter_info.get('submitters')
+        if oj_name in self._normal_accounts:
+            accounts = self._normal_accounts[oj_name]
+            for auth in accounts:
+                try:
+                    crawler = StatusCrawler(get_normal_client(oj_name, auth), daemon=True)
+                    submitter = Submitter(get_normal_client(oj_name, auth), submit_queue, crawler, daemon=True)
+                except exceptions.JudgeException as e:
+                    logger.error(f'Create submitter for {oj_name}:{auth} failed. Reason: {e}')
+                    continue
+                submitter.start()
+                submitters[auth[0]] = submitter
+        elif oj_name in self._contest_accounts:
+            accounts = self._contest_accounts[oj_name]
+            res = re.match(r'^.*?_ct_([0-9]+)$', oj_name)
+            if not res:
+                return False
+            site, contest_id = res
+            for auth in accounts:
+                try:
+                    crawler = StatusCrawler(get_contest_client(site, auth, contest_id), daemon=True)
+                    submitter = Submitter(
+                        get_contest_client(site, auth, contest_id), submit_queue, crawler, daemon=True)
+                except exceptions.JudgeException as e:
+                    logger.error(f'Create submitter for {oj_name}:{auth} failed. Reason: {e}')
+                    continue
+                submitter.start()
+                submitters[auth[0]] = submitter
+        if not submitters:
+            return False
+        submitter_info['start_time'] = datetime.utcnow()
+        self._running_submitters[oj_name] = submitter_info
+        return True
+
+    def _clean_free_clients(self):
+        pass
+
+
+class CrawlerHandler(threading.Thread):
+    def __init__(self, normal_accounts, contest_accounts, daemon=None):
+        super().__init__(daemon=daemon)
+        self._redis_con = redis.StrictRedis(
+            host=REDIS_CONFIG['host'], port=REDIS_CONFIG['port'], db=REDIS_CONFIG['db'])
+        self._normal_accounts = normal_accounts
+        self._contest_accounts = contest_accounts
+
+    def run(self):
+        pass
 
 
 class VJudge(object):
-    def __init__(self):
-        with open(OJ_CONFIG) as f:
-            oj_config = json.load(f)
-        self.accounts = oj_config['accounts']
-        self.pool = redis.ConnectionPool(host=REDIS_CONFIG['host'], port=REDIS_CONFIG['port'])
-        self.redis_con = redis.StrictRedis(connection_pool=self.pool)
-        self.available_ojs = []
-        self.submit_queues = {}
-        self.status_queues = {}
-        self.problem_queues = {}
+    def __init__(self, normal_accounts=None, contest_accounts=None):
+        if not normal_accounts and not contest_accounts:
+            logger.warning('Neither normal_accounts nor contest_accounts has available account, '
+                           'submitter and crawler will not work')
+        self._normal_accounts = normal_accounts or {}
+        self._contest_accounts = contest_accounts or {}
+
+    @property
+    def normal_accounts(self):
+        return self._normal_accounts
+
+    @property
+    def contest_accounts(self):
+        return self._contest_accounts
 
     def start(self):
-        for oj_name in self.accounts:
-            self._add_judge(oj_name)
-        if not self.available_ojs:
-            logging.warning('there is no oj is available')
-        else:
-            logging.info('{} are available'.format(self.available_ojs))
-        SubmitQueueHandler(self.submit_queues, pool=self.pool, daemon=True).start()
-        ProblemQueueHandler(self.problem_queues, pool=self.pool, daemon=True).start()
-        while True:
-            time.sleep(3600)
-            for oj_name in self.accounts:
-                if oj_name not in self.available_ojs:
-                    self._add_judge(oj_name)
-
-    def _add_judge(self, oj_name):
-        if oj_name not in self.accounts:
-            return False
-        available = False
-        for username in self.accounts[oj_name]:
-            password = self.accounts[oj_name][username]
-            try:
-                client = get_normal_client(oj_name, auth=(username, password))
-            except exceptions.JudgeException as e:
-                logging.error(e)
-                continue
-            logging.info("user '{}' log in to {} successfully".format(username, oj_name))
-            if not available:
-                self.submit_queues[oj_name] = Queue()
-                self.problem_queues[oj_name] = Queue()
-                self.status_queues[oj_name] = Queue()
-                available = True
-            Submitter(client, self.submit_queues.get(oj_name),
-                      self.status_queues.get(oj_name), daemon=True).start()
-        if available:
-            self.available_ojs.append(oj_name)
-            StatusCrawler(get_normal_client(oj_name),
-                          self.status_queues.get(oj_name), daemon=True).start()
-            ProblemCrawler(get_normal_client(oj_name),
-                           self.problem_queues.get(oj_name), daemon=True).start()
-        return available
+        submitter_handle = SubmitterHandler(self._normal_accounts, self._contest_accounts, True)
+        crawler_handle = CrawlerHandler(self._normal_accounts, self._contest_accounts, True)
+        submitter_handle.start()
+        crawler_handle.start()
+        submitter_handle.join()
+        crawler_handle.join()
