@@ -30,7 +30,7 @@ class SOJClient(BaseClient):
 
     def get_user_id(self):
         if self.auth is None:
-            raise exceptions.LoginRequired
+            raise exceptions.LoginRequired('Login is expired')
         return self.username
 
     def login(self, username, password):
@@ -41,25 +41,19 @@ class SOJClient(BaseClient):
             'password': password,
             'submit': 'login'
         }
-        try:
-            r = self._session.post(url, data, timeout=self.timeout)
-        except requests.exceptions.ConnectionError:
-            raise exceptions.ConnectionError
-        if re.search('USER_NOT_EXIST', r.text):
-            raise exceptions.UserNotExist
-        elif re.search('PASSWORD_ERROR', r.text):
-            raise exceptions.PasswordError
+        resp = self._request_url('post', url, data=data)
+        if re.search('USER_NOT_EXIST', resp):
+            raise exceptions.UserNotExist('User not exist')
+        elif re.search('PASSWORD_ERROR', resp):
+            raise exceptions.PasswordError('Password error')
         self.auth = (username, password)
         self.username = username
         self.password = password
 
     def check_login(self):
         url = f'{base_url}/update_user_form.action'
-        try:
-            r = self._session.get(url, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
-        if re.search('Please login first', r.text):
+        resp = self._request_url('get', url)
+        if re.search('Please login first', resp):
             return False
         return True
 
@@ -84,13 +78,10 @@ class SOJClient(BaseClient):
 
     def get_problem_list(self):
         url = f'{base_url}/problems.action'
-        try:
-            r = self._session.get(url, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
+        resp = self._request_url('get', url)
         volume_list = []
         try:
-            table = BeautifulSoup(r.text, 'lxml').find('table')
+            table = BeautifulSoup(resp, 'lxml').find('table')
             tr = table.find('tr')
             tr = tr.find_next_sibling('tr')
             tags = tr.find_all('a')
@@ -102,17 +93,14 @@ class SOJClient(BaseClient):
         problem_list = []
         for vol in volume_list:
             page_url = f'{url}?volume={vol}'
-            try:
-                r = self._session.get(page_url, timeout=self.timeout)
-            except requests.exceptions.RequestException:
-                raise exceptions.ConnectionError
-            problem_list += self.__class__._parse_problem_id(r.text)
+            resp = self._request_url('get', page_url)
+            problem_list += self.__class__._parse_problem_id(resp)
         problem_list.sort()
         return problem_list
 
     def submit_problem(self, problem_id, language, source_code):
         if self.auth is None:
-            raise exceptions.LoginRequired
+            raise exceptions.LoginExpired('Login is expired')
         submit_url = f'{base_url}/submit.action'
         status_url = f'{base_url}/solutions.action?userId={self.username}&problemId={problem_id}'
         captcha = self._get_captcha()
@@ -125,17 +113,14 @@ class SOJClient(BaseClient):
             'source': source_code,
             'submit': 'Submit'
         }
-        try:
-            r = self._session.post(submit_url, data, timeout=self.timeout)
-            if re.search('ERROR', r.text):
-                if not self.check_login():
-                    raise exceptions.LoginExpired
-                else:
-                    raise exceptions.SubmitError
-            r = self._session.get(status_url, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
-        soup = BeautifulSoup(r.text, 'lxml')
+        resp = self._request_url('post', submit_url, data=data)
+        if re.search('ERROR', resp):
+            if not self.check_login():
+                raise exceptions.LoginExpired('Login is expired')
+            else:
+                raise exceptions.SubmitError('Submit failed unexpectedly')
+        resp = self._request_url('get', status_url)
+        soup = BeautifulSoup(resp, 'lxml')
         try:
             tag = soup.find_all('table')[1].find_all('tr')[1]
             run_id = next(tag.stripped_strings)
@@ -145,12 +130,9 @@ class SOJClient(BaseClient):
 
     def get_submit_status(self, run_id, **kwargs):
         status_url = f'{base_url}/solutions.action?from={run_id}'
+        resp = self._request_url('get', status_url)
         try:
-            r = self._session.get(status_url, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
-        try:
-            soup = BeautifulSoup(r.text, 'lxml')
+            soup = BeautifulSoup(resp, 'lxml')
             tag = soup.find_all('table')[1].find_all('tr')[1]
             col_tags = tag.find_all('td')
             result = [' '.join(x.stripped_strings) for x in col_tags[5:]]
@@ -176,12 +158,21 @@ class SOJClient(BaseClient):
             ids.append(pid)
         return ids
 
+    def _request_url(self, method, url, data=None, timeout=None):
+        if timeout is None:
+            timeout = self.timeout
+        try:
+            r = self._session.request(method, url, data=data, timeout=timeout)
+        except requests.exceptions.RequestException:
+            raise exceptions.ConnectionError(f'Request "{url}" failed')
+        return r.text
+
     def _get_captcha(self):
         url = os.path.join(base_url, 'validation_code')
         try:
             r = self._session.get(url, timeout=self.timeout)
         except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
+            raise exceptions.ConnectionError(f'Request "{url}" failed')
         import hashlib
         h = hashlib.md5(r.content).hexdigest()
         cursor = db.cursor()

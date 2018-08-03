@@ -101,7 +101,6 @@ def refresh_problem(oj_name, problem_id):
 def get_submission_list():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
-
     pagination = Submission.query.paginate(
         page=page, per_page=per_page, error_out=False)
     submissions = pagination.items
@@ -145,6 +144,19 @@ def get_submission(id):
     if submission is None:
         abort(404)
     return jsonify(submission.to_json())
+
+
+@app.route('/submissions/<id>', methods=['POST'])
+def update_submission(id):
+    submission = Submission.query.get(id)
+    if submission is None:
+        return jsonify({'error': 'no such submission'}), 422
+    if submission.verdict not in ('Queuing','Being Judged'):
+        submission.verdict = 'Being Judged'
+        db.session.commit()
+        redis_con.lpush(submitter_queue, submission.id)
+    url = url_for('get_submission', id=submission.id, _external=True)
+    return jsonify({'status': 'success', 'id': submission.id, 'url': url})
 
 
 @app.route('/contests/<site>')

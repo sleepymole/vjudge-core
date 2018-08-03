@@ -131,7 +131,7 @@ class _UniClient(BaseClient):
         try:
             r = self._session.request(method, url, data=data, timeout=timeout)
         except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError(f'Cannot connect to "{url}"')
+            raise exceptions.ConnectionError(f'Request "{url}" failed')
         if re.search('Sign In Your Account', r.text):
             raise exceptions.LoginExpired('Login is expired')
         return r.text
