@@ -1,14 +1,27 @@
-import os
 import json
-import random
 import logging
+import os
+import random
 
-log_format = '[%(asctime)s] [%(process)d] [%(levelname)s] %(message)s'
+from gunicorn.glogging import Logger
+
+LOG_ENV = os.environ.get('LOG_ENV') or 'NORMAL'
+
+if LOG_ENV == 'JOURNAL':
+    log_format = r'[%(levelname)s] %(message)s'
+else:
+    log_format = r'[%(asctime)s] [%(process)d] [%(levelname)s] %(message)s'
+
+
+class GLogger(Logger):
+    error_fmt = log_format
+
+
 logging.basicConfig(level=logging.INFO, format=log_format, datefmt='%Y-%m-%d %H:%M:%S %z')
 logger = logging.getLogger('vjudge-core')
 
-SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
-                          'sqlite:///' + os.path.dirname(__file__) + '/data.sqlite'
+SQLALCHEMY_DATABASE_URI = (os.environ.get('DATABASE_URL') or
+                           'sqlite:///' + os.path.dirname(__file__) + '/data.sqlite')
 
 OJ_CONFIG = os.path.dirname(__file__) + '/accounts.json'
 
