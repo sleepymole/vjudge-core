@@ -6,7 +6,7 @@ from queue import Queue, Empty
 from datetime import datetime, timedelta
 from sqlalchemy import or_
 from config import REDIS_CONFIG, logger
-from .site import get_client_by_oj_name, supported_sites, exceptions
+from .site import get_client_by_oj_name, exceptions
 from .models import db, Submission, Problem, Contest
 
 
@@ -69,9 +69,16 @@ class StatusCrawler(threading.Thread):
                 logger.error(f'Crawled status failed, submission_id: {submission.id}, reason: {e}')
                 return
             except exceptions.LoginExpired:
-                self._client.update_cookies()
-                logger.debug(f'StatusCrawler login expired, login again, name: {self._name}, user_id: {self._user_id}')
-                continue
+                try:
+                    self._client.update_cookies()
+                    logger.debug(
+                        f'StatusCrawler login expired, login again, name: {self._name}, user_id: {self._user_id}')
+                    continue
+                except exceptions.ConnectionError as e:
+                    submission.verdict = 'Judge Failed'
+                    db.session.commit()
+                    logger.error(f'Crawled status failed, submission_id: {submission.id}, reason: {e}')
+                    return
             if verdict not in ('Being Judged', 'Queuing', 'Compiling', 'Running'):
                 submission.verdict = verdict
                 submission.exe_time = exe_time
@@ -156,10 +163,94 @@ class PageCrawler(threading.Thread):
         self._client = client
         self._name = client.get_name()
         self._user_id = client.get_user_id()
+        self._client_type = client.get_client_type()
+        self._supported_crawl_type = ['problem']
+        if self._client_type == 'contest':
+            self._supported_crawl_type.append('contest')
         self._page_queue = page_queue
+        self._stop_event = threading.Event()
 
     def run(self):
-        pass
+        logger.info(f'Started PageCrawler, name: {self._name}, user_id: {self._user_id}')
+        while True:
+            try:
+                data = self._page_queue.get(timeout=60)
+            except Empty:
+                if self._stop_event.is_set():
+                    break
+                continue
+            if not isinstance(data, dict):
+                logger.error(f'PageCrawler: data type should be dict, data: "{data}"')
+                continue
+            crawl_type = data.get('type')
+            if crawl_type not in self._supported_crawl_type:
+                logger.error(f'Unsupported crawl_type: {crawl_type}')
+                continue
+            try:
+                if crawl_type == 'problem':
+                    problem_id = data.get('problem_id')
+                    if problem_id:
+                        self._crawl_problem(problem_id)
+                    else:
+                        self._crawl_problem_all()
+                elif crawl_type == 'contest':
+                    self._crawl_contest()
+            except exceptions.ConnectionError as e:
+                logger.error(f'Crawled problem failed, name: {self._name}, user_id: {self._user_id}, reason: {e}')
+            except exceptions.LoginExpired:
+                try:
+                    self._client.update_cookies()
+                    self._page_queue.put(data)
+                    logger.debug(
+                        f'PageCrawler login expired, login again, name: {self._name}, user_id: {self._user_id}')
+                except exceptions.ConnectionError as e:
+                    logger.error(f'Crawled contest failed, name: {self._name}, user_id: {self._user_id}, reason: {e}')
+        logger.info(f'Stopped PageCrawler, name: {self._name}, user_id: {self._user_id}')
+
+    def _crawl_problem(self, problem_id):
+        result = self._client.get_problem(problem_id)
+        if not isinstance(result, dict):
+            logger.error(f'No such problem, name: {self._name}, '
+                         f'user_id: {self._user_id}, problem_id: {problem_id}')
+            return
+        problem = Problem.query.filter_by(oj_name=self._name, problem_id=problem_id).first() or Problem()
+        problem.oj_name = self._name
+        problem.problem_id = problem_id
+        problem.last_update = datetime.utcnow()
+        problem.title = result.get('title')
+        problem.description = result.get('description')
+        problem.input = result.get('input')
+        problem.output = result.get('output')
+        problem.sample_input = result.get('sample_input')
+        problem.sample_output = result.get('sample_output')
+        problem.time_limit = result.get('time_limit')
+        problem.mem_limit = result.get('mem_limit')
+        db.session.add(problem)
+        db.session.commit()
+        logger.info(f'Crawled problem successfully, name: {self._name}, '
+                    f'user_id: {self._user_id}, problem_id: {problem_id}')
+
+    def _crawl_problem_all(self):
+        problem_list = self._client.get_problem_list()
+        for problem_id in problem_list:
+            self._crawl_problem(problem_id)
+
+    def _crawl_contest(self):
+        contest = Contest.query.filter_by(oj_name=self._name).first() or Contest()
+        contest_info = self._client.get_contest_info()
+        contest.oj_name = self._name
+        contest.site = contest_info.site
+        contest.contest_id = contest_info.contest_id
+        contest.title = contest_info.title
+        contest.public = contest_info.public
+        contest.status = contest_info.status
+        contest.start_time = datetime.fromtimestamp(contest_info.start_time)
+        contest.end_time = datetime.fromtimestamp(contest_info.end_time)
+        self._crawl_problem_all()
+        db.session.add(contest)
+        db.session.commit()
+        logger.info(f'Crawler contest successfully, name: {self._name}, '
+                    f'user_id: {self._user_id}, contest_id: {contest.contest_id}')
 
 
 class SubmitterHandler(threading.Thread):
@@ -267,6 +358,8 @@ class CrawlerHandler(threading.Thread):
             host=REDIS_CONFIG['host'], port=REDIS_CONFIG['port'], db=REDIS_CONFIG['db'])
         self._normal_accounts = normal_accounts
         self._contest_accounts = contest_accounts
+        self._running_crawlers = {}
+        self._stopping_crawlers = {}
 
     def run(self):
         while True:
@@ -277,6 +370,9 @@ class CrawlerHandler(threading.Thread):
                 data = json.loads(data[1])
             except json.JSONDecodeError:
                 logger.error(f'CrawlerHandler: received corrupt data "{data[1]}"')
+                continue
+            if not isinstance(data, dict):
+                logger.error(f'CrawlerHandler: data type should be dict, data: "{data}"')
                 continue
             crawl_type = data.get('type')
             oj_name = data.get('oj_name')

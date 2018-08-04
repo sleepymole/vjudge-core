@@ -22,6 +22,10 @@ class BaseClient(ABC):
         pass
 
     @abstractmethod
+    def get_client_type(self):
+        pass
+
+    @abstractmethod
     def login(self, username, password):
         pass
 

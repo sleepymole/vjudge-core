@@ -41,6 +41,9 @@ class _UniClient(BaseClient):
             raise exceptions.LoginRequired('Login is required')
         return self.username
 
+    def get_client_type(self):
+        return self.client_type
+
     def login(self, username, password):
         url = self._get_login_url()
         data = {

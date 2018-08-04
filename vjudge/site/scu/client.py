@@ -20,6 +20,7 @@ class SOJClient(BaseClient):
         super().__init__()
         self.auth = auth
         self.name = 'scu'
+        self.client_type = 'practice'
         self.timeout = kwargs.get('timeout', 5)
         if auth is not None:
             self.username, self.password = auth
@@ -32,6 +33,9 @@ class SOJClient(BaseClient):
         if self.auth is None:
             raise exceptions.LoginRequired('Login is expired')
         return self.username
+
+    def get_client_type(self):
+        return self.client_type
 
     def login(self, username, password):
         url = base_url + '/login.action'
@@ -64,14 +68,11 @@ class SOJClient(BaseClient):
 
     def get_problem(self, problem_id):
         url = f'{base_url}/problem.action?id={problem_id}'
-        try:
-            r = self._session.get(url, timeout=self.timeout)
-        except requests.exceptions.RequestException:
-            raise exceptions.ConnectionError
-        if re.search('No such problem', r.text):
+        resp = self._request_url('get', url)
+        if re.search('No such problem', resp):
             return
         try:
-            title = re.findall('<title>{}: (.*?)</title>'.format(problem_id), r.text)[0]
+            title = re.findall('<title>{}: (.*?)</title>'.format(problem_id), resp)[0]
         except IndexError:
             return
         return {'title': title}
