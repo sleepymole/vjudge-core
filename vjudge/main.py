@@ -1,13 +1,15 @@
 import asyncio
-import threading
 import json
-import redis
-from queue import Queue, Empty
+import threading
 from datetime import datetime, timedelta
+from queue import Queue, Empty
+
+import redis
 from sqlalchemy import or_
+
 from config import REDIS_CONFIG, logger
-from .site import get_client_by_oj_name, exceptions
 from .models import db, Submission, Problem, Contest
+from .site import get_client_by_oj_name, exceptions
 
 
 class StatusCrawler(threading.Thread):
@@ -246,11 +248,11 @@ class PageCrawler(threading.Thread):
         contest.status = contest_info.status
         contest.start_time = datetime.fromtimestamp(contest_info.start_time)
         contest.end_time = datetime.fromtimestamp(contest_info.end_time)
-        self._crawl_problem_all()
         db.session.add(contest)
         db.session.commit()
         logger.info(f'Crawler contest successfully, name: {self._name}, '
                     f'user_id: {self._user_id}, contest_id: {contest.contest_id}')
+        self._crawl_problem_all()
 
 
 class SubmitterHandler(threading.Thread):
@@ -272,6 +274,7 @@ class SubmitterHandler(threading.Thread):
             data = self._redis_con.brpop(self._redis_key, timeout=600)
             if datetime.utcnow() - last_clean > timedelta(hours=1):
                 self._clean_free_submitters()
+                last_clean = datetime.utcnow()
             if not data:
                 continue
             try:
@@ -282,6 +285,9 @@ class SubmitterHandler(threading.Thread):
             submission = Submission.query.get(submission_id)
             if not submission:
                 logger.error(f'Submission {submission_id} is not found')
+                continue
+            if submission.oj_name not in self._normal_accounts and submission.oj_name not in self._contest_accounts:
+                logger.error(f'Unsupported oj_name: {submission.oj_name}')
                 continue
             if submission.oj_name not in self._queues:
                 self._queues[submission.oj_name] = Queue()
@@ -359,11 +365,16 @@ class CrawlerHandler(threading.Thread):
         self._normal_accounts = normal_accounts
         self._contest_accounts = contest_accounts
         self._running_crawlers = {}
-        self._stopping_crawlers = {}
+        self._stopping_crawlers = set()
+        self._queues = {}
 
     def run(self):
+        last_clean = datetime.utcnow()
         while True:
             data = self._redis_con.brpop(self._redis_key, timeout=600)
+            if datetime.utcnow() - last_clean > timedelta(hours=1):
+                self._clean_free_crawlers()
+                last_clean = datetime.utcnow()
             if not data:
                 continue
             try:
@@ -379,30 +390,78 @@ class CrawlerHandler(threading.Thread):
             if crawl_type not in ('problem', 'contest'):
                 logger.error(f'Unsupported crawl_type: {crawl_type}')
                 continue
-            if oj_name not in self._normal_accounts or oj_name not in self._contest_accounts:
+            if oj_name not in self._normal_accounts and oj_name not in self._contest_accounts:
                 logger.error(f'Unsupported oj_name: {oj_name}')
                 continue
+            if oj_name not in self._queues:
+                self._queues[oj_name] = Queue()
+            crawl_queue = self._queues.get(oj_name)
+            if oj_name not in self._running_crawlers:
+                if not self._start_new_crawlers(oj_name, crawl_queue):
+                    logger.error(f'Cannot start client for {oj_name}')
+                    continue
+            assert oj_name in self._running_crawlers
             if crawl_type == 'problem':
                 crawl_all = data.get('all')
                 problem_id = data.get('problem_id')
-                if crawl_type is not True:
+                if crawl_all is not True:
                     crawl_all = False
                 if not crawl_all and problem_id is None:
                     logger.error('Missing crawl_params: problem_id')
                     continue
-                self._handle_problem_crawling(oj_name, crawl_all, problem_id)
+                data = {'type': 'problem'}
+                if not crawl_all:
+                    data['problem_id'] = problem_id
+                crawl_queue.put(data)
             elif crawl_type == 'contest':
-                contest_id = data.get('contest_id')
-                if contest_id is None:
-                    logger.error('Missing crawl_params: contest_id')
-                    continue
-                self._handle_contest_crawling(oj_name, contest_id)
+                crawl_queue.put({'type': 'contest'})
 
-    def _handle_problem_crawling(self, oj_name, crawl_all=False, problem_id=None):
-        pass
+    def _start_new_crawlers(self, oj_name, crawl_queue):
+        crawler_info = {'crawlers': {}}
+        crawlers = crawler_info.get('crawlers')
+        accounts = {}
+        if oj_name in self._normal_accounts:
+            accounts = self._normal_accounts[oj_name]
+        if oj_name in self._contest_accounts:
+            accounts = self._contest_accounts[oj_name]
+        for auth in accounts:
+            try:
+                crawler = PageCrawler(get_client_by_oj_name(oj_name, auth), crawl_queue, daemon=True)
+            except exceptions.JudgeException as e:
+                logger.error(f'Create crawler failed, name: {oj_name}, user_id: auth[0], reason: {e}')
+                continue
+            crawler.start()
+            crawlers[auth[0]] = crawler
+        if not crawlers:
+            return False
+        crawler_info['start_time'] = datetime.utcnow()
+        self._running_crawlers[oj_name] = crawler_info
+        return True
 
-    def _handle_contest_crawling(self, oj_name, contest_id):
-        pass
+    def _clean_free_crawlers(self):
+        free_clients = []
+        for oj_name in self._running_crawlers:
+            crawler_info = self._running_crawlers[oj_name]
+            if datetime.utcnow() - crawler_info['start_time'] > timedelta(hours=1):
+                free_clients.append(oj_name)
+        for oj_name in free_clients:
+            crawler_info = self._running_crawlers[oj_name]
+            crawlers = crawler_info.get('crawlers')
+            for user_id in crawlers:
+                crawler = crawlers.get(user_id)
+                crawler.stop()
+                self._stopping_crawlers.add(crawler)
+            self._running_crawlers.pop(oj_name)
+            logger.info(f'No more task, stop all {oj_name} crawlers')
+        stopped_crawlers = []
+        for crawler in self._stopping_crawlers:
+            if not crawler.is_alive():
+                stopped_crawlers.append(crawler)
+        for crawler in stopped_crawlers:
+            self._stopping_crawlers.remove(crawler)
+        logger.info('Cleaned free crawlers')
+        logger.info(f'Running crawlers: {self._running_crawlers}')
+        logger.info(f'Stopping crawlers: {self._stopping_crawlers}')
 
 
 class VJudge(object):

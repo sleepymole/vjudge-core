@@ -151,7 +151,7 @@ def update_submission(id):
     submission = Submission.query.get(id)
     if submission is None:
         return jsonify({'error': 'no such submission'}), 422
-    if submission.verdict not in ('Queuing','Being Judged'):
+    if submission.verdict not in ('Queuing', 'Being Judged'):
         submission.verdict = 'Being Judged'
         db.session.commit()
         redis_con.lpush(submitter_queue, submission.id)
@@ -187,9 +187,8 @@ def crawl_contest_info(site, contest_id):
     if site not in supported_contest_sites:
         return jsonify({'error': f'site {site} is not supported'}), 422
     redis_con.lpush(crawler_queue, json.dumps({
-        'oj_name': site,
-        'type': 'contest',
-        'contest_id': contest_id
+        'oj_name': f'{site}_ct_{contest_id}',
+        'type': 'contest'
     }))
     url = url_for('get_contest_info', site=site, contest_id=contest_id, _external=True)
     return jsonify({'status': 'success', 'url': url})
