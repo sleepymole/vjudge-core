@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import random
+import re
 
 from gunicorn.glogging import Logger
 
@@ -36,6 +37,8 @@ SQLALCHEMY_DATABASE_URI = (os.environ.get('DATABASE_URL') or
                            'sqlite:///' + os.path.dirname(__file__) + '/data.sqlite')
 
 OJ_CONFIG = os.path.dirname(__file__) + '/accounts.json'
+
+DEFAULT_REDIS_URI = 'redis://localhost:6379/0'
 
 REDIS_CONFIG = {
     'host': 'localhost',
@@ -117,3 +120,13 @@ def get_accounts():
                 authentications = contest_accounts.get(oj_name)
                 authentications.append((auth['username'], auth['password']))
     return normal_accounts, contest_accounts
+
+
+def init_redis_config():
+    redis_uri = os.environ.get('REDIS_URI') or DEFAULT_REDIS_URI
+    match = re.match('^redis://(.*?):([0-9]+)/([0-9]+)$', redis_uri)
+    if match:
+        REDIS_CONFIG['host'], REDIS_CONFIG['port'], REDIS_CONFIG['db'] = match.groups()
+
+
+init_redis_config()
