@@ -30,7 +30,7 @@ class StatusCrawler(threading.Thread):
         asyncio.set_event_loop(self._loop)
         self._loop.call_soon(self._start_event.set)
         self._loop.run_forever()
-        pending_tasks = asyncio.all_tasks(self._loop)
+        pending_tasks = self._pending_tasks()
         self._loop.run_until_complete(asyncio.gather(*pending_tasks))
 
     def wait_start(self, timeout=None):
@@ -92,6 +92,13 @@ class StatusCrawler(threading.Thread):
         submission.verdict = 'Judge Failed'
         db.session.commit()
         logger.error(f'Crawled status failed, submission_id: {submission.id}, reason: Timeout')
+
+    def _pending_tasks(self):
+        if hasattr(asyncio, 'all_tasks'):
+            pending_tasks = asyncio.all_tasks(self._loop)
+        else:
+            pending_tasks = {t for t in asyncio.Task.all_tasks(self._loop) if not t.done()}
+        return pending_tasks
 
     def __repr__(self):
         return f'<StatusCrawler(oj_name={self._name}, user_id={self._user_id})>'
