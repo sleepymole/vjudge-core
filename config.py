@@ -6,18 +6,30 @@ import random
 from gunicorn.glogging import Logger
 
 LOG_ENV = os.environ.get('LOG_ENV') or 'NORMAL'
+LOG_LEVEL = os.environ.get('LOG_LEVEL') or 'info'
+LOG_LEVELS = {
+    "critical": logging.CRITICAL,
+    "error": logging.ERROR,
+    "warning": logging.WARNING,
+    "info": logging.INFO,
+    "debug": logging.DEBUG
+}
 
 if LOG_ENV == 'JOURNAL':
     log_format = r'[%(levelname)s] %(message)s'
 else:
     log_format = r'[%(asctime)s] [%(process)d] [%(levelname)s] %(message)s'
 
+date_fmt = r'%Y-%m-%d %H:%M:%S %z'
+
 
 class GLogger(Logger):
     error_fmt = log_format
+    datefmt = date_fmt
 
 
-logging.basicConfig(level=logging.INFO, format=log_format, datefmt='%Y-%m-%d %H:%M:%S %z')
+log_level = LOG_LEVELS.get(LOG_LEVEL, logging.INFO)
+logging.basicConfig(level=log_level, format=log_format, datefmt=date_fmt)
 logger = logging.getLogger('vjudge-core')
 
 SQLALCHEMY_DATABASE_URI = (os.environ.get('DATABASE_URL') or
