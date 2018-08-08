@@ -216,6 +216,9 @@ class PageCrawler(threading.Thread):
                     logger.error(f'Crawled contest failed, name: {self._name}, user_id: {self._user_id}, reason: {e}')
         logger.info(f'Stopped PageCrawler, name: {self._name}, user_id: {self._user_id}')
 
+    def stop(self):
+        self._stop_event.set()
+
     def _crawl_problem(self, problem_id):
         result = self._client.get_problem(problem_id)
         if not isinstance(result, dict):
