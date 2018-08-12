@@ -82,9 +82,6 @@ def get_problem(oj_name, problem_id):
 
 @app.route('/problems/<oj_name>/<problem_id>', methods=['POST'])
 def refresh_problem(oj_name, problem_id):
-    problem = Problem.query.filter_by(oj_name=oj_name, problem_id=problem_id).first()
-    if problem is None:
-        return jsonify({'error': 'problem not found'}), 422
     redis_con.lpush(crawler_queue, json.dumps({
         'oj_name': oj_name,
         'type': 'problem',
