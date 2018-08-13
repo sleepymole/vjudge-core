@@ -18,10 +18,6 @@ class PasswordError(LoginError):
     pass
 
 
-class LoginExpired(JudgeException):
-    pass
-
-
 class LoginRequired(JudgeException):
     pass
 

@@ -1,7 +1,7 @@
 import re
 from abc import abstractmethod
-from urllib.parse import urljoin
 from datetime import datetime, timedelta
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -53,7 +53,7 @@ class _UniClient(BaseClient):
         }
         try:
             self._request_url('post', url, data=data)
-        except exceptions.LoginExpired:
+        except exceptions.LoginRequired:
             raise exceptions.LoginError('User not exist or wrong password')
         self.auth = (username, password)
         self.username = username
@@ -136,7 +136,7 @@ class _UniClient(BaseClient):
         except requests.exceptions.RequestException:
             raise exceptions.ConnectionError(f'Request "{url}" failed')
         if re.search('Sign In Your Account', r.text):
-            raise exceptions.LoginExpired('Login is expired')
+            raise exceptions.LoginRequired('Login is required')
         return r.text
 
     def _get_login_url(self):
@@ -245,7 +245,7 @@ class HDUClient(_UniClient):
         url = BASE_URL + '/control_panel.php'
         try:
             self._request_url('get', url)
-        except exceptions.LoginExpired:
+        except exceptions.LoginRequired:
             return False
         return True
 
@@ -320,10 +320,7 @@ class HDUContestClient(_UniClient, ContestClient):
 
     def refresh_contest_info(self):
         url = f'{BASE_URL}/contests/contest_show.php?cid={self.contest_id}'
-        try:
-            resp = self._request_url('get', url)
-        except exceptions.LoginExpired:
-            raise exceptions.LoginRequired('Login is required')
+        resp = self._request_url('get', url)
         if re.search(r'System Message', resp):
             raise exceptions.ConnectionError(f'Contest {self.contest_id} not exists')
         self._contest_info.problem_list = self.__class__._parse_problem_id(resp)

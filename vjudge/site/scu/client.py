@@ -31,7 +31,7 @@ class SOJClient(BaseClient):
 
     def get_user_id(self):
         if self.auth is None:
-            raise exceptions.LoginRequired('Login is expired')
+            raise exceptions.LoginRequired('Login is required')
         return self.username
 
     def get_client_type(self):
@@ -101,7 +101,7 @@ class SOJClient(BaseClient):
 
     def submit_problem(self, problem_id, language, source_code):
         if self.auth is None:
-            raise exceptions.LoginExpired('Login is expired')
+            raise exceptions.LoginRequired('Login is required')
         submit_url = f'{base_url}/submit.action'
         status_url = f'{base_url}/solutions.action?userId={self.username}&problemId={problem_id}'
         captcha = self._get_captcha()
@@ -117,7 +117,7 @@ class SOJClient(BaseClient):
         resp = self._request_url('post', submit_url, data=data)
         if re.search('ERROR', resp):
             if not self.check_login():
-                raise exceptions.LoginExpired('Login is expired')
+                raise exceptions.LoginRequired('Login is required')
             else:
                 raise exceptions.SubmitError('Submit failed unexpectedly')
         resp = self._request_url('get', status_url)

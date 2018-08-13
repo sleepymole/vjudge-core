@@ -70,7 +70,7 @@ class StatusCrawler(threading.Thread):
                 db.session.commit()
                 logger.error(f'Crawled status failed, submission_id: {submission.id}, reason: {e}')
                 return
-            except exceptions.LoginExpired:
+            except exceptions.LoginRequired:
                 try:
                     self._client.update_cookies()
                     logger.debug(
@@ -137,7 +137,7 @@ class Submitter(threading.Thread):
                 submission.verdict = 'Submit Failed'
                 db.session.commit()
                 logger.error(f'Submission {submission.id} is submitted failed, reason: {e}')
-            except exceptions.LoginExpired:
+            except exceptions.LoginRequired:
                 try:
                     self._client.update_cookies()
                     self._submit_queue.put(submission.id)
@@ -206,7 +206,7 @@ class PageCrawler(threading.Thread):
                     self._crawl_contest()
             except exceptions.ConnectionError as e:
                 logger.error(f'Crawled problem failed, name: {self._name}, user_id: {self._user_id}, reason: {e}')
-            except exceptions.LoginExpired:
+            except exceptions.LoginRequired:
                 try:
                     self._client.update_cookies()
                     self._page_queue.put(data)
