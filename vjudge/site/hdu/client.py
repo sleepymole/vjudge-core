@@ -97,6 +97,8 @@ class _UniClient(BaseClient):
         resp = self._request_url('post', url, data=data)
         if re.search('Code length is improper', resp):
             raise exceptions.SubmitError('Code length is too short')
+        if re.search("Please don't re-submit in 5 seconds, thank you.", resp):
+            raise exceptions.SubmitError('Submit too frequently')
         if not re.search('Realtime Status', resp):
             raise exceptions.SubmitError('Submit failed unexpectedly')
         url = self._get_status_url(problem_id=problem_id, user_id=self.username)

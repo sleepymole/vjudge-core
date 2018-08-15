@@ -1,6 +1,7 @@
 import asyncio
 import json
 import threading
+import time
 from datetime import datetime, timedelta
 from queue import Queue, Empty
 
@@ -125,6 +126,7 @@ class Submitter(threading.Thread):
                 if self._stop_event.is_set():
                     break
                 continue
+            logger.info(f'Start judging submission {submission.id}, verdict: {submission.verdict}')
             if submission.verdict not in ('Queuing', 'Being Judged'):
                 continue
             if submission.verdict == 'Being Judged':
@@ -154,6 +156,7 @@ class Submitter(threading.Thread):
                 db.session.commit()
                 logger.info(f'Submission {submission.id} is submitted successfully')
                 self._status_crawler.add_task(submission.id)
+            time.sleep(5)
         logger.info(f'Stopping submitter, name: {self._name}, user_id: {self._user_id}')
         self._status_crawler.stop()
         self._status_crawler.join()
@@ -205,7 +208,7 @@ class PageCrawler(threading.Thread):
                 elif crawl_type == 'contest':
                     self._crawl_contest()
             except exceptions.ConnectionError as e:
-                logger.error(f'Crawled problem failed, name: {self._name}, user_id: {self._user_id}, reason: {e}')
+                logger.error(f'Crawled page failed, name: {self._name}, user_id: {self._user_id}, reason: {e}')
             except exceptions.LoginRequired:
                 try:
                     self._client.update_cookies()
@@ -249,6 +252,7 @@ class PageCrawler(threading.Thread):
 
     def _crawl_contest(self):
         contest = Contest.query.filter_by(oj_name=self._name).first() or Contest()
+        self._client.refresh_contest_info()
         contest_info = self._client.get_contest_info()
         contest.oj_name = self._name
         contest.site = contest_info.site
@@ -260,7 +264,7 @@ class PageCrawler(threading.Thread):
         contest.end_time = datetime.fromtimestamp(contest_info.end_time)
         db.session.add(contest)
         db.session.commit()
-        logger.info(f'Crawler contest successfully, name: {self._name}, '
+        logger.info(f'Crawled contest successfully, name: {self._name}, '
                     f'user_id: {self._user_id}, contest_id: {contest.contest_id}')
         self._crawl_problem_all()
 
