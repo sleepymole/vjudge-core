@@ -442,7 +442,7 @@ class CrawlerHandler(threading.Thread):
             try:
                 crawler = PageCrawler(get_client_by_oj_name(oj_name, auth), crawl_queue, daemon=True)
             except exceptions.JudgeException as e:
-                logger.error(f'Create crawler failed, name: {oj_name}, user_id: auth[0], reason: {e}')
+                logger.error(f'Create crawler failed, name: {oj_name}, user_id: {auth[0]}, reason: {e}')
                 continue
             crawler.start()
             crawlers[auth[0]] = crawler
