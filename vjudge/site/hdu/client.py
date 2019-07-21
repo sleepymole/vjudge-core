@@ -1,6 +1,6 @@
 import re
 from abc import abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin
 
 import requests
@@ -403,5 +403,6 @@ class HDUContestClient(_UniClient, ContestClient):
             d = [int(x) for x in d]
         except ValueError:
             return 0
-        utc = datetime(*d) - timedelta(hours=8)
+
+        utc = datetime(*d, tzinfo=timezone.utc) - timedelta(hours=8)
         return utc.timestamp()

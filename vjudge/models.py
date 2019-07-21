@@ -52,7 +52,7 @@ class Problem(db.Model):
         problem_json = {
             'oj_name': self.oj_name,
             'problem_id': self.problem_id,
-            'last_update': self.last_update.timestamp(),
+            'last_update': self._to_timestamp(self.last_update),
             'title': self.title,
             'description': self.description,
             'input': self.input,
@@ -72,6 +72,11 @@ class Problem(db.Model):
         }
         return summary_json
 
+    @staticmethod
+    def _to_timestamp(dt):
+        dt = datetime(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, tzinfo=timezone.utc)
+        return dt.timestamp()
+
     def __repr__(self):
         return f'<Problem(oj_name={self.oj_name}, problem_id={self.problem_id}, title={self.title})>'
 
@@ -84,8 +89,8 @@ class Contest(db.Model):
     title = Column(String, default='')
     public = Column(Boolean, default=False)
     status = Column(String, default='Pending')
-    start_time = Column(DateTime, default=datetime.fromtimestamp(0, tz=timezone.utc))
-    end_time = Column(DateTime, default=datetime.fromtimestamp(0, tz=timezone.utc))
+    start_time = Column(DateTime, default=datetime.utcfromtimestamp(0))
+    end_time = Column(DateTime, default=datetime.utcfromtimestamp(0))
 
     __table_args__ = (UniqueConstraint('site', 'contest_id', name='_site_contest_id_uc'),)
 
@@ -97,10 +102,15 @@ class Contest(db.Model):
             'title': self.title,
             'public': self.public,
             'status': self.status,
-            'start_time': self.start_time.timestamp(),
-            'end_time': self.end_time.timestamp(),
+            'start_time': self._to_timestamp(self.start_time),
+            'end_time': self._to_timestamp(self.end_time),
         }
         return contest_json
+
+    @staticmethod
+    def _to_timestamp(dt):
+        dt = datetime(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, tzinfo=timezone.utc)
+        return dt.timestamp()
 
     def __repr__(self):
         return (f'<Contest(site={self.site} contest_id={self.contest_id}, title="{self.title}", '

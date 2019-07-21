@@ -2,7 +2,7 @@ import asyncio
 import json
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from queue import Queue, Empty
 
 import redis
@@ -260,8 +260,8 @@ class PageCrawler(threading.Thread):
         contest.title = contest_info.title
         contest.public = contest_info.public
         contest.status = contest_info.status
-        contest.start_time = datetime.fromtimestamp(contest_info.start_time)
-        contest.end_time = datetime.fromtimestamp(contest_info.end_time)
+        contest.start_time = datetime.fromtimestamp(contest_info.start_time, tz=timezone.utc)
+        contest.end_time = datetime.fromtimestamp(contest_info.end_time, tz=timezone.utc)
         db.session.add(contest)
         db.session.commit()
         logger.info(f'Crawled contest successfully, name: {self._name}, '
