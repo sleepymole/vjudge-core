@@ -98,7 +98,7 @@ def refresh_problem(oj_name, problem_id):
 def get_submission_list():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
-    pagination = Submission.query.paginate(
+    pagination = Submission.query.order_by(Submission.id.desc()).paginate(
         page=page, per_page=per_page, error_out=False)
     submissions = pagination.items
     page = pagination.page
